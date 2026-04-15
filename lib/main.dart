@@ -1,0 +1,102 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'screens/auth/login_screen.dart';
+import 'screens/auth/register_screen.dart';
+import 'screens/dashboard/consumer_dashboard_screen.dart';
+import 'screens/dashboard/farmer_dashboard_screen.dart';
+import 'screens/dashboard/admin_dashboard_screen.dart';
+import 'screens/profile/consumer_my_profile_screen.dart';
+import 'screens/profile/farmer_my_profile_screen.dart';
+import 'screens/products/product_list_screen.dart';
+import 'screens/products/product_detail_screen.dart';
+import 'screens/products/add_product_screen.dart';
+import 'screens/orders/consumer_orders_screen.dart';
+import 'screens/orders/farmer_orders_screen.dart';
+import 'screens/users/admin_users_screen.dart';
+import 'screens/buyer/buyer_cart_screen.dart';
+import 'services/auth_service.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize secure storage
+  await _initializeSecureStorage();
+  
+  runApp(const FarmFreshApp());
+}
+
+Future<void> _initializeSecureStorage() async {
+  try {
+    // Initialize FlutterSecureStorage for web compatibility
+    const storage = FlutterSecureStorage();
+    await storage.write(key: 'test', value: 'initialized');
+    await storage.delete(key: 'test');
+  } catch (e) {
+    print('Secure storage initialization: $e');
+  }
+}
+
+class FarmFreshApp extends StatelessWidget {
+  const FarmFreshApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (context) => AuthService(),
+      child: Consumer<AuthService>(
+        builder: (context, authService, child) {
+          return MaterialApp(
+            title: 'FarmFresh',
+            debugShowCheckedModeBanner: false,
+            theme: ThemeData(
+              primarySwatch: Colors.green,
+              colorScheme: ColorScheme.fromSeed(
+                seedColor: const Color(0xFF2E7D32),
+                brightness: Brightness.light,
+              ),
+              useMaterial3: true,
+            ),
+            home: _getInitialScreen(authService),
+            routes: {
+              '/login': (context) => const LoginScreen(),
+              '/register': (context) => const RegisterScreen(),
+              '/consumer_dashboard': (context) => const ConsumerDashboardScreen(),
+              '/farmer_dashboard': (context) => const FarmerDashboardScreen(),
+              '/admin_dashboard': (context) => const AdminDashboardScreen(),
+              '/consumer_profile': (context) => const ConsumerMyProfileScreen(),
+              '/farmer_profile': (context) => const FarmerMyProfileScreen(),
+              '/products': (context) => const ProductListScreen(),
+              '/orders': (context) => const ConsumerOrdersScreen(),
+              '/cart': (context) {
+                // Get buyer UID from route arguments or use default
+                final args = ModalRoute.of(context)?.settings.arguments;
+                final buyerUid = args is String ? args : '12345'; // Default for testing
+                return BuyerCartScreen(buyerUid: buyerUid);
+              },
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _getInitialScreen(AuthService authService) {
+    final user = authService.currentUser;
+    
+    if (user == null) {
+      return const LoginScreen();
+    }
+    
+    switch (user!.userType) {
+      case 'consumer':
+        return const ConsumerDashboardScreen();
+      case 'farmer':
+        return const FarmerDashboardScreen();
+      case 'admin':
+        return const AdminDashboardScreen();
+      default:
+        return const LoginScreen();
+    }
+  }
+}
