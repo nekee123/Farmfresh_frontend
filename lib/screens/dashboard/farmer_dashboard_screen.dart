@@ -6,6 +6,8 @@ import '../products/add_product_screen.dart';
 import '../products/product_list_screen.dart';
 import '../profile/farmer_my_profile_screen.dart';
 import '../orders/farmer_orders_screen.dart';
+import '../notifications/notifications_screen.dart';
+import '../chat/chat_list_screen.dart';
 import '../../widgets/hamburger_menu.dart';
 
 class FarmerDashboardScreen extends StatefulWidget {
@@ -20,12 +22,430 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
   bool _isLoadingRating = true;
   int _productCount = 0;
   bool _isLoadingProductCount = true;
+  double _totalRevenue = 0.0;
+  int _orderCount = 0;
+  bool _isLoadingStats = true;
+  List<Map<String, dynamic>> _notifications = [];
+  bool _showNotificationCard = false;
+  int _unreadCount = 0;
 
   @override
   void initState() {
     super.initState();
     _loadSellerRating();
     _loadProductCount();
+    _loadSellerStats();
+    _loadNotifications();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Refresh stats when screen regains focus
+    _refreshAllStats();
+  }
+
+  Future<void> _refreshAllStats() async {
+    await Future.wait([
+      _loadSellerRating(),
+      _loadProductCount(),
+      _loadSellerStats(),
+      _loadNotifications(),
+    ]);
+  }
+
+  Future<void> _loadNotifications() async {
+    try {
+      final response = await ApiService.getNotifications();
+      if (response.success && response.data != null) {
+        setState(() {
+          _notifications = response.data!;
+          _unreadCount = _notifications.where((n) => (n['is_read'] ?? false) == false).length;
+        });
+      }
+    } catch (e) {
+      print('Error loading notifications: $e');
+    }
+  }
+
+  Future<void> _loadSellerStats() async {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    if (authService.currentUser?.uid != null) {
+      try {
+        final response = await ApiService.getSellerOrders(authService.currentUser!.uid);
+        if (response.success && response.data != null && mounted) {
+          final orders = response.data!;
+          double revenue = 0.0;
+          int count = 0;
+          
+          for (var order in orders) {
+            if (order['order_status']?.toString().toLowerCase() == 'delivered') {
+              revenue += (order['total_price'] as num?)?.toDouble() ?? 0.0;
+              count++;
+            }
+          }
+          
+          setState(() {
+            _totalRevenue = revenue;
+            _orderCount = count;
+            _isLoadingStats = false;
+          });
+        } else if (mounted) {
+          setState(() {
+            _isLoadingStats = false;
+          });
+        }
+      } catch (e) {
+        print('Error loading seller stats: $e');
+        if (mounted) {
+          setState(() {
+            _isLoadingStats = false;
+          });
+        }
+      }
+    }
+  }
+
+  Future<void> _toggleNotificationCard() async {
+    if (_showNotificationCard) {
+      setState(() {
+        _showNotificationCard = false;
+      });
+      return;
+    }
+
+    // Load notifications
+    try {
+      final response = await ApiService.getNotifications();
+      if (response.success && response.data != null) {
+        setState(() {
+          _notifications = response.data!;
+          _unreadCount = _notifications.where((n) => (n['is_read'] ?? false) == false).length;
+          _showNotificationCard = true;
+        });
+      }
+    } catch (e) {
+      print('Error loading notifications: $e');
+    }
+  }
+
+  Future<void> _showNotificationBottomSheet(BuildContext context) async {
+    // Load notifications
+    try {
+      final response = await ApiService.getNotifications();
+      if (response.success && response.data != null) {
+        _notifications = response.data!;
+      }
+    } catch (e) {
+      print('Error loading notifications: $e');
+    }
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => _buildNotificationBottomSheet(),
+    );
+  }
+
+  Widget _buildNotificationBottomSheet() {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      constraints: BoxConstraints(
+        maxHeight: MediaQuery.of(context).size.height * 0.8,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: const BoxDecoration(
+              color: Color(0xFF2E7D32),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.notifications, color: Colors.white, size: 28),
+                const SizedBox(width: 12),
+                const Text(
+                  'Notifications',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(context),
+                ),
+              ],
+            ),
+          ),
+          // Notifications list
+          Flexible(
+            child: _notifications.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(40),
+                      child: Column(
+                        children: [
+                          Icon(
+                            Icons.notifications_none,
+                            size: 80,
+                            color: Color(0xFF2E7D32),
+                          ),
+                          SizedBox(height: 20),
+                          Text(
+                            'No notifications',
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFF2E7D32),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _notifications.length,
+                    itemBuilder: (context, index) {
+                      final notification = _notifications[index];
+                      return _buildFloatingNotificationCard(notification);
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFloatingNotificationCard(Map<String, dynamic> notification) {
+    final isRead = notification['is_read'] ?? false;
+    final type = notification['type'] ?? 'info';
+    final senderName = notification['sender_name'] ?? 'Unknown';
+    final productName = notification['product_name'] ?? 'product';
+    final createdAt = notification['created_at'];
+    final notificationUid = notification['uid'];
+
+    String title;
+    String message;
+    IconData icon;
+    Color iconColor;
+
+    switch (type.toLowerCase()) {
+      case 'order_placed':
+        title = 'New Order';
+        message = '$senderName ordered $productName';
+        icon = Icons.shopping_cart;
+        iconColor = Colors.blue;
+        break;
+      case 'order_confirmed':
+        title = 'Order Confirmed';
+        message = 'The seller $senderName has confirmed your order for $productName';
+        icon = Icons.check_circle;
+        iconColor = Colors.green;
+        break;
+      case 'order_rejected':
+        title = 'Order Rejected';
+        message = 'The seller $senderName has rejected your order for $productName';
+        icon = Icons.cancel;
+        iconColor = Colors.red;
+        break;
+      case 'order_delivered':
+        title = 'Order Delivered';
+        message = 'The seller $senderName has marked your order for $productName as delivered';
+        icon = Icons.local_shipping;
+        iconColor = Colors.green;
+        break;
+      default:
+        title = 'Notification';
+        message = 'You have a new notification';
+        icon = Icons.notifications;
+        iconColor = Colors.grey;
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: isRead ? Colors.black.withOpacity(0.05) : Colors.black.withOpacity(0.15),
+            blurRadius: isRead ? 8 : 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: isRead ? null : const Border(
+          left: BorderSide(color: Color(0xFF2E7D32), width: 4),
+        ),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(icon, color: iconColor, size: 28),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () {
+                    if (!isRead) {
+                      ApiService.markNotificationAsRead(notificationUid);
+                      setState(() {
+                        final index = _notifications.indexWhere((n) => n['uid'] == notificationUid);
+                        if (index != -1) {
+                          _notifications[index]['is_read'] = true;
+                          _unreadCount = _notifications.where((n) => (n['is_read'] ?? false) == false).length;
+                        }
+                      });
+                    }
+                    // Navigate to Farmer Orders
+                    setState(() {
+                      _showNotificationCard = false;
+                    });
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => const FarmerOrdersScreen()),
+                    );
+                  },
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          fontWeight: isRead ? FontWeight.w600 : FontWeight.bold,
+                          fontSize: 16,
+                          color: isRead ? Colors.grey[700] : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        message,
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isRead ? Colors.grey[600] : Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _formatDate(createdAt),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[500],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              PopupMenuButton<String>(
+                icon: const Icon(Icons.more_vert, color: Colors.grey),
+                onSelected: (value) async {
+                  if (value == 'mark_read') {
+                    if (!isRead) {
+                      ApiService.markNotificationAsRead(notificationUid);
+                      setState(() {
+                        final index = _notifications.indexWhere((n) => n['uid'] == notificationUid);
+                        if (index != -1) {
+                          _notifications[index]['is_read'] = true;
+                          _unreadCount = _notifications.where((n) => (n['is_read'] ?? false) == false).length;
+                        }
+                      });
+                    }
+                  } else if (value == 'delete') {
+                    final response = await ApiService.deleteNotification(notificationUid);
+                    if (response.success) {
+                      setState(() {
+                        _notifications.removeWhere((n) => n['uid'] == notificationUid);
+                        _unreadCount = _notifications.where((n) => (n['is_read'] ?? false) == false).length;
+                      });
+                    }
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'mark_read',
+                    child: Row(
+                      children: [
+                        Icon(
+                          isRead ? Icons.mark_email_read : Icons.mark_email_unread,
+                          color: isRead ? Colors.grey : const Color(0xFF2E7D32),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(isRead ? 'Mark as unread' : 'Mark as read'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Row(
+                      children: [
+                        Icon(Icons.delete, color: Colors.red),
+                        SizedBox(width: 8),
+                        Text('Delete'),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(dynamic dateValue) {
+    try {
+      DateTime date;
+      if (dateValue is double) {
+        date = DateTime.fromMillisecondsSinceEpoch(dateValue.toInt());
+      } else if (dateValue is int) {
+        date = DateTime.fromMillisecondsSinceEpoch(dateValue);
+      } else {
+        date = DateTime.parse(dateValue.toString());
+      }
+      
+      final now = DateTime.now();
+      final difference = now.difference(date);
+      
+      if (difference.inMinutes < 1) {
+        return 'Just now';
+      } else if (difference.inMinutes < 60) {
+        return '${difference.inMinutes} min ago';
+      } else if (difference.inHours < 24) {
+        return '${difference.inHours} hour${difference.inHours > 1 ? 's' : ''} ago';
+      } else if (difference.inDays < 7) {
+        return '${difference.inDays} day${difference.inDays > 1 ? 's' : ''} ago';
+      } else {
+        return '${date.day}/${date.month}/${date.year}';
+      }
+    } catch (e) {
+      return dateValue.toString();
+    }
   }
 
   Future<void> _loadSellerRating() async {
@@ -86,9 +506,19 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context);
     
+    // Role-based access control
+    if (!authService.isSeller()) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushReplacementNamed(context, '/login');
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
-      body: CustomScrollView(
+      body: Stack(
+        children: [
+          CustomScrollView(
         slivers: [
           // App Bar with Search
           SliverAppBar(
@@ -164,12 +594,50 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
             ),
             actions: [
               IconButton(
-                icon: const Icon(Icons.notifications_outlined),
+                icon: const Icon(Icons.chat_outlined),
                 onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('You have 3 new orders!')),
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const ChatListScreen(),
+                    ),
                   );
                 },
+              ),
+              Stack(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.notifications_outlined),
+                    onPressed: () {
+                      _toggleNotificationCard();
+                    },
+                  ),
+                  if (_unreadCount > 0)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
+                        child: Text(
+                          _unreadCount > 9 ? '9+' : _unreadCount.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ),
+                ],
               ),
               const HamburgerMenu(),
             ],
@@ -205,7 +673,12 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: _buildStatCard('Revenue', '₱0', Icons.attach_money, Colors.orange),
+                        child: _buildStatCard(
+                          'Revenue', 
+                          _isLoadingStats ? 'Loading...' : '₱${_totalRevenue.toStringAsFixed(0)}', 
+                          Icons.attach_money, 
+                          Colors.orange
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -214,6 +687,28 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
                           _isLoadingRating ? 'Loading...' : '${_sellerRating.toStringAsFixed(1)}★', 
                           Icons.star, 
                           Colors.amber
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _buildStatCard(
+                          'Orders', 
+                          _isLoadingStats ? 'Loading...' : '$_orderCount', 
+                          Icons.receipt_long, 
+                          Colors.blue
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _buildStatCard(
+                          'Products', 
+                          _isLoadingProductCount ? 'Loading...' : '$_productCount', 
+                          Icons.inventory_2, 
+                          Colors.green
                         ),
                       ),
                     ],
@@ -256,8 +751,8 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
                               ),
                             );
                             if (result == true && mounted) {
-                              // Refresh product count after adding a product
-                              _loadProductCount();
+                              // Refresh all stats after adding a product
+                              _refreshAllStats();
                             }
                           },
                         ),
@@ -404,8 +899,8 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
                               ),
                             );
                             if (result == true && mounted) {
-                              // Refresh product count after adding a product
-                              _loadProductCount();
+                              // Refresh all stats after adding a product
+                              _refreshAllStats();
                             }
                           },
                           style: ElevatedButton.styleFrom(
@@ -489,6 +984,114 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
             ),
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 32)),
+        ],
+      ),
+          if (_showNotificationCard)
+            GestureDetector(
+              onTap: () {
+                setState(() {
+                  _showNotificationCard = false;
+                });
+              },
+              child: Container(
+                color: Colors.black.withOpacity(0.3),
+                child: Center(
+                  child: GestureDetector(
+                    onTap: () {}, // Prevent tap from dismissing
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: MediaQuery.of(context).size.width * 0.9,
+                        maxHeight: MediaQuery.of(context).size.height * 0.6,
+                      ),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.3),
+                              blurRadius: 20,
+                              offset: const Offset(0, 10),
+                            ),
+                          ],
+                        ),
+                        child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          // Header
+                          Container(
+                            padding: const EdgeInsets.all(20),
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF2E7D32),
+                              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.notifications, color: Colors.white, size: 28),
+                                const SizedBox(width: 12),
+                                const Text(
+                                  'Notifications',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 20,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const Spacer(),
+                                IconButton(
+                                  icon: const Icon(Icons.close, color: Colors.white),
+                                  onPressed: () {
+                                    setState(() {
+                                      _showNotificationCard = false;
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Notifications list
+                          Flexible(
+                            child: _notifications.isEmpty
+                                ? const Center(
+                                    child: Padding(
+                                      padding: EdgeInsets.all(40),
+                                      child: Column(
+                                        children: [
+                                          Icon(
+                                            Icons.notifications_none,
+                                            size: 80,
+                                            color: Color(0xFF2E7D32),
+                                          ),
+                                          SizedBox(height: 20),
+                                          Text(
+                                            'No notifications',
+                                            style: TextStyle(
+                                              fontSize: 18,
+                                              fontWeight: FontWeight.bold,
+                                              color: Color(0xFF2E7D32),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  )
+                                : ListView.builder(
+                                    padding: const EdgeInsets.all(16),
+                                    itemCount: _notifications.length,
+                                    itemBuilder: (context, index) {
+                                      final notification = _notifications[index];
+                                      return _buildFloatingNotificationCard(notification);
+                                    },
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
         ],
       ),
       // Bottom Navigation

@@ -2,7 +2,7 @@ class Review {
   final String uid;
   final String buyerUid;
   final String buyerName;
-  final String buyerProfilePicture;
+  final String? buyerProfilePicture;
   final String sellerUid;
   final String productUid;
   final String productName;
@@ -15,7 +15,7 @@ class Review {
     required this.uid,
     required this.buyerUid,
     required this.buyerName,
-    required this.buyerProfilePicture,
+    this.buyerProfilePicture,
     required this.sellerUid,
     required this.productUid,
     required this.productName,
@@ -61,6 +61,7 @@ class Review {
 class ReviewCreateRequest {
   final String orderUid;
   final String buyerUid;
+  final String buyerName;
   final String sellerUid;
   final String productUid;
   final int rating;
@@ -69,6 +70,7 @@ class ReviewCreateRequest {
   ReviewCreateRequest({
     required this.orderUid,
     required this.buyerUid,
+    required this.buyerName,
     required this.sellerUid,
     required this.productUid,
     required this.rating,
@@ -79,8 +81,8 @@ class ReviewCreateRequest {
     return {
       'order_uid': orderUid,
       'buyer_uid': buyerUid,
+      'buyer_name': buyerName,
       'seller_uid': sellerUid,
-      'farm_product_uid': productUid,
       'product_uid': productUid,
       'rating': rating,
       'comment': comment,

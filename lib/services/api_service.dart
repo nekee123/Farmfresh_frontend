@@ -11,18 +11,36 @@ class ApiService {
   static const String baseUrl = 'http://localhost:8000'; // Your FastAPI server URL
   static const Duration timeout = Duration(seconds: 30);
 
+  static String? _token;
+
+  static void setToken(String token) {
+    _token = token;
+  }
+
+  static void clearToken() {
+    _token = null;
+  }
+
+  static Map<String, String> _getHeaders() {
+    final headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
+    if (_token != null) {
+      headers['Authorization'] = 'Bearer $_token';
+    }
+    return headers;
+  }
+
   // Generic GET request
   static Future<ApiResponse<T>> get<T>(
     String endpoint,
-    T Function(Map<String, dynamic>) fromJson,
+    T Function(dynamic) fromJson,
   ) async {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl$endpoint'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
+        headers: _getHeaders(),
       );
       
       if (response.statusCode == 200) {
@@ -45,13 +63,13 @@ class ApiService {
   // Generic POST request
   static Future<ApiResponse<T>> post<T>(
     String endpoint,
-    dynamic data,
-    T Function(Map<String, dynamic>) fromJson,
+    Map<String, dynamic> data,
+    T Function(dynamic) fromJson,
   ) async {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl$endpoint'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
         body: json.encode(data),
       );
       
@@ -93,7 +111,7 @@ class ApiService {
     try {
       final response = await http.delete(
         Uri.parse('$baseUrl$endpoint'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
       );
       
       if (response.statusCode == 200 || response.statusCode == 204) {
@@ -115,13 +133,13 @@ class ApiService {
   // Generic PUT request
   static Future<ApiResponse<T>> put<T>(
     String endpoint,
-    dynamic data,
-    T Function(Map<String, dynamic>) fromJson,
+    Map<String, dynamic> data,
+    T Function(dynamic) fromJson,
   ) async {
     try {
       final response = await http.put(
         Uri.parse('$baseUrl$endpoint'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
         body: json.encode(data),
       );
       
@@ -142,180 +160,103 @@ class ApiService {
     }
   }
 
-  // Update buyer profile
-  static Future<ApiResponse<Buyer>> updateBuyerProfile(
-    String uid, {
-    String? name,
-    String? phoneNumber,
-    String? location,
-    String? profilePicture,
-  }) async {
-    final Map<String, dynamic> body = {};
-    if (name != null) body['name'] = name;
-    if (phoneNumber != null) body['phone_number'] = phoneNumber;
-    if (location != null) body['location'] = location;
-    if (profilePicture != null) body['profile_picture'] = profilePicture;
-
-    return await put('/api/buyers/$uid/', body, Buyer.fromJson);
-  }
-
-  // Update seller profile
-  static Future<ApiResponse<Seller>> updateSellerProfile(
-    String uid, {
-    String? name,
-    String? phoneNumber,
-    String? location,
-    String? profilePicture,
-  }) async {
-    final Map<String, dynamic> body = {};
-    if (name != null) body['name'] = name;
-    if (phoneNumber != null) body['phone_number'] = phoneNumber;
-    if (location != null) body['location'] = location;
-    if (profilePicture != null) body['profile_picture'] = profilePicture;
-
-    return await put('/api/sellers/$uid/', body, Seller.fromJson);
-  }
-
   // Create review
   static Future<ApiResponse<Map<String, dynamic>>> createReview(
     Map<String, dynamic> reviewData,
   ) async {
-    return await post('/api/reviews/', reviewData, (json) => json);
+    try {
+      print('📤 Creating review request: ${json.encode(reviewData)}');
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/reviews/'),
+        headers: _getHeaders(),
+        body: json.encode(reviewData),
+      );
+      
+      print('📥 Review creation response: ${response.statusCode} - ${response.body}');
+      
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final Map<String, dynamic> responseData = json.decode(response.body);
+        return ApiResponse<Map<String, dynamic>>(
+          success: true,
+          data: responseData,
+        );
+      } else {
+        String errorDetails = '';
+        try {
+          final Map<String, dynamic> errorResponse = json.decode(response.body);
+          if (errorResponse.containsKey('detail')) {
+            errorDetails = ' - ${errorResponse['detail']}';
+          }
+          print('🚨 Backend error response: ${response.body}');
+        } catch (e) {
+          print('🚨 Raw error response: ${response.body}');
+        }
+        
+        return ApiResponse<Map<String, dynamic>>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}$errorDetails',
+        );
+      }
+    } catch (e) {
+      print('🚨 Network error creating review: $e');
+      return ApiResponse<Map<String, dynamic>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
   }
 
   // ========== AUTHENTICATION ENDPOINTS ==========
-  
-  // Login Buyer
-  static Future<ApiResponse<User>> loginBuyer(
+
+  // Unified Login
+  static Future<ApiResponse<Map<String, dynamic>>> login(
     Map<String, dynamic> loginData,
   ) async {
     try {
-      print('🌐 Making POST request to: $baseUrl/api/buyers/login/');
-      print('📤 Request body: ${json.encode(loginData)}');
-      
+      print('🌐 Making POST request to: $baseUrl/api/auth/login');
       final response = await http.post(
-        Uri.parse('$baseUrl/api/buyers/login/'),
-        headers: {'Content-Type': 'application/json'},
+        Uri.parse('$baseUrl/api/auth/login'),
+        headers: _getHeaders(),
         body: json.encode(loginData),
       );
-      
-      print('📥 Response status: ${response.statusCode}');
-      print('📥 Response body: ${response.body}');
-      
+
       if (response.statusCode == 200) {
         final Map<String, dynamic> data = json.decode(response.body);
-        final user = User.fromJson(data);
-        return ApiResponse<User>(
+        return ApiResponse<Map<String, dynamic>>(
           success: true,
-          data: user,
+          data: data,
         );
       } else {
-        return ApiResponse<User>(
+        return ApiResponse<Map<String, dynamic>>(
           success: false,
-          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+          error: 'Login failed: ${response.statusCode}',
         );
       }
     } catch (e) {
-      print('💥 API exception: $e');
-      return ApiResponse<User>(
+      return ApiResponse<Map<String, dynamic>>(
         success: false,
         error: 'Network error: $e',
       );
     }
   }
 
-  // Login Seller  
-  static Future<ApiResponse<User>> loginSeller(
-    Map<String, dynamic> loginData,
-  ) async {
-    try {
-      final response = await http.post(
-        Uri.parse('$baseUrl/api/sellers/login/'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(loginData),
-      );
-      
-      print('📤 Sending seller login request: ${json.encode(loginData)}');
-      print('📥 Seller login response: ${response.statusCode} - ${response.body}');
-      
-      if (response.statusCode == 200) {
-        final Map<String, dynamic> responseData = json.decode(response.body);
-        
-        // Convert backend response to User object
-        final user = User(
-          uid: responseData['uid'],
-          name: responseData['name'],
-          phoneNumber: responseData['phone_number'],
-          userType: 'farmer',
-        );
-        
-        return ApiResponse<User>(
-          success: true,
-          data: user,
-        );
-      } else {
-        // Try to get detailed error from backend response
-        String errorDetails = '';
-        try {
-          final Map<String, dynamic> errorResponse = json.decode(response.body);
-          if (errorResponse.containsKey('detail')) {
-            errorDetails = ' - ${errorResponse['detail']}';
-          }
-          print('🚨 Backend error response: ${response.body}');
-        } catch (e) {
-          print('🚨 Raw error response: ${response.body}');
-        }
-        
-        return ApiResponse<User>(
-          success: false,
-          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}$errorDetails',
-        );
-      }
-    } catch (e) {
-      print('🚨 Network error: $e');
-      return ApiResponse<User>(
-        success: false,
-        error: 'Network error: $e',
-      );
-    }
-  }
-
-  // Register Buyer
-  static Future<ApiResponse<User>> registerBuyer(
-    Map<String, dynamic> registerData,
-  ) async {
-    return await post('/api/buyers/', registerData, User.fromJson);
-  }
-
-  // Register Seller
-  static Future<ApiResponse<User>> registerSeller(
+  // Unified Register
+  static Future<ApiResponse<Map<String, dynamic>>> register(
     Map<String, dynamic> registerData,
   ) async {
     try {
+      print('🌐 Making POST request to: $baseUrl/api/auth/register');
       final response = await http.post(
-        Uri.parse('$baseUrl/api/sellers/'),
-        headers: {'Content-Type': 'application/json'},
+        Uri.parse('$baseUrl/api/auth/register'),
+        headers: _getHeaders(),
         body: json.encode(registerData),
       );
-      
-      print('📤 Seller registration request: ${json.encode(registerData)}');
-      print('📥 Seller registration response: ${response.statusCode} - ${response.body}');
-      
-      if (response.statusCode == 201) {
-        final Map<String, dynamic> responseData = json.decode(response.body);
-        
-        // Convert SellerResponse to User object
-        final user = User(
-          uid: responseData['uid'],
-          name: responseData['name'],
-          phoneNumber: responseData['phone_number'],
-          userType: 'farmer',
-          location: responseData['location'] ?? '',
-        );
-        
-        return ApiResponse<User>(
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        return ApiResponse<Map<String, dynamic>>(
           success: true,
-          data: user,
+          data: data,
         );
       } else {
         // Try to get detailed error from backend response
@@ -330,14 +271,53 @@ class ApiService {
           print('🚨 Raw error response: ${response.body}');
         }
         
-        return ApiResponse<User>(
+        return ApiResponse<Map<String, dynamic>>(
           success: false,
-          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}$errorDetails',
+          error: 'Registration failed: ${response.statusCode}$errorDetails',
         );
       }
     } catch (e) {
-      print('🚨 Network error: $e');
-      return ApiResponse<User>(
+      return ApiResponse<Map<String, dynamic>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Update User Profile
+  static Future<ApiResponse<Map<String, dynamic>>> updateProfile(
+    Map<String, dynamic> profileData,
+  ) async {
+    try {
+      print('🌐 Making PUT request to: $baseUrl/api/auth/profile');
+      final response = await http.put(
+        Uri.parse('$baseUrl/api/auth/profile'),
+        headers: _getHeaders(),
+        body: json.encode(profileData),
+      );
+
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        return ApiResponse<Map<String, dynamic>>(
+          success: true,
+          data: data,
+        );
+      } else {
+        String errorDetails = '';
+        try {
+          final Map<String, dynamic> errorResponse = json.decode(response.body);
+          if (errorResponse.containsKey('detail')) {
+            errorDetails = ' - ${errorResponse['detail']}';
+          }
+        } catch (_) {}
+        
+        return ApiResponse<Map<String, dynamic>>(
+          success: false,
+          error: 'Profile update failed${errorDetails}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<Map<String, dynamic>>(
         success: false,
         error: 'Network error: $e',
       );
@@ -353,7 +333,7 @@ class ApiService {
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/api/products/'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
         body: json.encode(productData),
       );
       
@@ -399,10 +379,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/api/products/'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
+        headers: _getHeaders(),
       ).timeout(timeout);
       
       print('🌐 Making GET request to: ${Uri.parse('$baseUrl/api/products/')}');
@@ -449,6 +426,34 @@ class ApiService {
     }
   }
 
+  // Get Product by UID
+  static Future<ApiResponse<Map<String, dynamic>>> getProduct(String productUid) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/products/$productUid/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return ApiResponse<Map<String, dynamic>>(
+          success: true,
+          data: Map<String, dynamic>.from(data),
+        );
+      } else {
+        return ApiResponse<Map<String, dynamic>>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<Map<String, dynamic>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
   // Delete Product
   static Future<ApiResponse<void>> deleteProduct(String productUid) async {
     try {
@@ -458,7 +463,7 @@ class ApiService {
       
       final response = await http.delete(
         url,
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
       ).timeout(timeout);
       
       print('📥 Delete response status: ${response.statusCode}');
@@ -502,7 +507,7 @@ class ApiService {
     try {
       final response = await http.patch(
         Uri.parse('$baseUrl/api/products/$productUid/'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
         body: json.encode(productData),
       ).timeout(timeout);
       
@@ -547,7 +552,7 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/api/orders/buyer/$buyerId/'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
       ).timeout(timeout);
       
       if (response.statusCode == 200) {
@@ -577,7 +582,425 @@ class ApiService {
     try {
       final response = await http.get(
         Uri.parse('$baseUrl/api/orders/seller/$sellerId/'),
-        headers: {'Content-Type': 'application/json'},
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: true,
+          data: data.cast<Map<String, dynamic>>(),
+        );
+      } else {
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      print('🚨 Error in getSellerOrders: $e');
+      return ApiResponse<List<Map<String, dynamic>>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Get seller rating
+  static Future<ApiResponse<double>> getSellerRating(String sellerId) async {
+    return await get('/api/sellers/$sellerId/rating/', (json) => (json['rating'] ?? 0.0).toDouble());
+  }
+
+  // ========== ADMIN STATISTICS ENDPOINTS ==========
+
+  // Get total users count
+  static Future<ApiResponse<int>> getTotalUsers() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/admin/stats/users/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        return ApiResponse<int>(
+          success: true,
+          data: data['count'] ?? 0,
+        );
+      } else {
+        return ApiResponse<int>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<int>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Get total products count
+  static Future<ApiResponse<int>> getTotalProducts() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/admin/stats/products/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        return ApiResponse<int>(
+          success: true,
+          data: data['count'] ?? 0,
+        );
+      } else {
+        return ApiResponse<int>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<int>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Get total orders count
+  static Future<ApiResponse<int>> getTotalOrders() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/admin/stats/orders/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        return ApiResponse<int>(
+          success: true,
+          data: data['count'] ?? 0,
+        );
+      } else {
+        return ApiResponse<int>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<int>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Get total farmers count
+  static Future<ApiResponse<int>> getTotalFarmers() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/admin/stats/farmers/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        return ApiResponse<int>(
+          success: true,
+          data: data['count'] ?? 0,
+        );
+      } else {
+        return ApiResponse<int>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<int>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Get all users for admin
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getAllUsers() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/admin/users'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: true,
+          data: data.map((item) => Map<String, dynamic>.from(item)).toList(),
+        );
+      } else {
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<List<Map<String, dynamic>>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // ========== USER MANAGEMENT ENDPOINTS ==========
+
+  // Approve user
+  static Future<ApiResponse<void>> approveUser(String userId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/admin/users/$userId/approve'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Block user
+  static Future<ApiResponse<void>> blockUser(String userId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/admin/users/$userId/block'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Unblock user
+  static Future<ApiResponse<void>> unblockUser(String userId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/admin/users/$userId/unblock'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Ban user
+  static Future<ApiResponse<void>> banUser(String userId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/admin/users/$userId/ban'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Delete user
+  static Future<ApiResponse<void>> deleteUser(String userId) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/api/admin/users/$userId'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Confirm Order
+  static Future<ApiResponse<void>> confirmOrder(String orderUid) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/api/orders/$orderUid/confirm/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Reject Order
+  static Future<ApiResponse<void>> rejectOrder(String orderUid) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/api/orders/$orderUid/reject/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Cancel Order
+  static Future<ApiResponse<void>> cancelOrder(String orderUid) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/api/orders/$orderUid/cancel/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Delete Order
+  static Future<ApiResponse<void>> deleteOrder(String orderUid) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/api/orders/$orderUid/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Mark Order as Delivered
+  static Future<ApiResponse<void>> markOrderAsDelivered(String orderUid) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/api/orders/$orderUid/delivered/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Get Notifications
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getNotifications() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/notifications/'),
+        headers: _getHeaders(),
       ).timeout(timeout);
       
       if (response.statusCode == 200) {
@@ -600,33 +1023,273 @@ class ApiService {
     }
   }
 
-  // Get buyer profile
-  static Future<ApiResponse<Buyer>> getBuyer(String uid) async {
-    return await get('/api/buyers/$uid/', Buyer.fromJson);
+  // Mark Notification as Read
+  static Future<ApiResponse<void>> markNotificationAsRead(String notificationUid) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/api/notifications/$notificationUid/read/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
   }
 
-  // Get seller profile
-  static Future<ApiResponse<Seller>> getSeller(String uid) async {
-    return await get('/api/sellers/$uid/', Seller.fromJson);
+  // Delete Notification
+  static Future<ApiResponse<void>> deleteNotification(String notificationUid) async {
+    try {
+      final response = await http.delete(
+        Uri.parse('$baseUrl/api/notifications/$notificationUid/'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200 || response.statusCode == 204) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
   }
 
-  // Get seller profile for public view
-  static Future<ApiResponse<Seller>> getSellerProfile(String sellerId) async {
-    return await get('/api/sellers/$sellerId/profile/', Seller.fromJson);
-  }
-
-  // Get seller rating
-  static Future<ApiResponse<double>> getSellerRating(String sellerId) async {
-    return await get('/api/sellers/$sellerId/rating/', (json) => (json['rating'] ?? 0.0).toDouble());
+  // Get current user profile
+  static Future<ApiResponse<Map<String, dynamic>>> getCurrentUserProfile() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/users/me'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return ApiResponse<Map<String, dynamic>>(
+          success: true,
+          data: Map<String, dynamic>.from(data),
+        );
+      } else {
+        return ApiResponse<Map<String, dynamic>>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<Map<String, dynamic>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
   }
 
   // Get seller reviews
   static Future<ApiResponse<List<Map<String, dynamic>>>> getSellerReviews(String sellerId) async {
-    return await get('/api/sellers/$sellerId/reviews/', (json) {
-      if (json['reviews'] is List) {
-        return (json['reviews'] as List).map((item) => Map<String, dynamic>.from(item)).toList();
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/reviews/seller/$sellerId'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+
+      print('🌐 Fetching reviews for seller: $sellerId');
+      print('📥 Response status: ${response.statusCode}');
+       
+      if (response.statusCode == 200) {
+        final dynamic data = json.decode(response.body);
+        print('📊 Response data type: ${data.runtimeType}');
+        
+        List<Map<String, dynamic>> reviews = [];
+        
+        // Handle different response formats
+        if (data is List) {
+          reviews = data.map((item) => Map<String, dynamic>.from(item)).toList();
+        } else if (data is Map<String, dynamic>) {
+          if (data['reviews'] is List) {
+            reviews = (data['reviews'] as List).map((item) => Map<String, dynamic>.from(item)).toList();
+          } else if (data['data'] is List) {
+            reviews = (data['data'] as List).map((item) => Map<String, dynamic>.from(item)).toList();
+          }
+        }
+        
+        print('📊 Reviews for seller $sellerId: ${reviews.length}');
+        
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: true,
+          data: reviews,
+        );
+      } else {
+        print('🚨 Failed to fetch reviews: ${response.statusCode}');
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
       }
-      return <Map<String, dynamic>>[];
-    });
+    } catch (e) {
+      print('🚨 Error in getSellerReviews: $e');
+      return ApiResponse<List<Map<String, dynamic>>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // ========== CHAT ENDPOINTS ==========
+  
+  // Get messages between two users
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getMessages(String userId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/messages/$userId'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: true,
+          data: data.cast<Map<String, dynamic>>(),
+        );
+      } else {
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<List<Map<String, dynamic>>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Send a message
+  static Future<ApiResponse<Map<String, dynamic>>> sendMessage(Map<String, dynamic> messageData) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$baseUrl/api/messages/'),
+        headers: _getHeaders(),
+        body: json.encode(messageData),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final Map<String, dynamic> data = json.decode(response.body);
+        return ApiResponse<Map<String, dynamic>>(
+          success: true,
+          data: data,
+        );
+      } else {
+        return ApiResponse<Map<String, dynamic>>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<Map<String, dynamic>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Get conversations for current user
+  static Future<ApiResponse<List<Map<String, dynamic>>>> getConversations() async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/conversations'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: true,
+          data: data.cast<Map<String, dynamic>>(),
+        );
+      } else {
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<List<Map<String, dynamic>>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Mark message as read
+  static Future<ApiResponse<void>> markMessageAsRead(String messageUid) async {
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/api/messages/$messageUid/read'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        return ApiResponse<void>(success: true);
+      } else {
+        return ApiResponse<void>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<void>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
+  // Search items (products, sellers, buyers)
+  static Future<ApiResponse<List<Map<String, dynamic>>>> searchItems(String query, String searchType) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/search').replace(
+          queryParameters: {
+            'query': query,
+            'search_type': searchType,
+          },
+        ),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      if (response.statusCode == 200) {
+        final List<dynamic> data = json.decode(response.body);
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: true,
+          data: data.map((item) => Map<String, dynamic>.from(item)).toList(),
+        );
+      } else {
+        return ApiResponse<List<Map<String, dynamic>>>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<List<Map<String, dynamic>>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
   }
 }

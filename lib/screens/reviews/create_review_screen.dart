@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../models/order.dart';
 import '../../models/review.dart';
 import '../../services/api_service.dart';
+import '../../services/auth_service.dart';
 import '../../models/api_response.dart';
 import '../../widgets/custom_button.dart';
 
@@ -278,9 +280,17 @@ class _CreateReviewScreenState extends State<CreateReviewScreen> {
     });
 
     try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final currentUser = authService.currentUser;
+      
+      if (currentUser == null) {
+        throw Exception('User not logged in');
+      }
+
       final reviewRequest = ReviewCreateRequest(
         orderUid: widget.order.uid,
         buyerUid: widget.order.buyerUid,
+        buyerName: currentUser.name ?? 'User',
         sellerUid: widget.order.sellerUid,
         productUid: widget.order.farmProductUid,
         rating: _rating,

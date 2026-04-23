@@ -1,15 +1,68 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/auth_service.dart';
+import '../../services/api_service.dart';
 import '../users/admin_users_screen.dart';
+import '../products/admin_products_screen.dart';
 import '../../widgets/hamburger_menu.dart';
 
-class AdminDashboardScreen extends StatelessWidget {
+class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
+
+  @override
+  State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
+}
+
+class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+  int _totalUsers = 0;
+  int _totalProducts = 0;
+  int _totalOrders = 0;
+  int _totalFarmers = 0;
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadStatistics();
+  }
+
+  Future<void> _loadStatistics() async {
+    try {
+      final usersResponse = await ApiService.getTotalUsers();
+      final productsResponse = await ApiService.getTotalProducts();
+      final ordersResponse = await ApiService.getTotalOrders();
+      final farmersResponse = await ApiService.getTotalFarmers();
+
+      if (mounted) {
+        setState(() {
+          _totalUsers = usersResponse.success ? usersResponse.data ?? 0 : 0;
+          _totalProducts = productsResponse.success ? productsResponse.data ?? 0 : 0;
+          _totalOrders = ordersResponse.success ? ordersResponse.data ?? 0 : 0;
+          _totalFarmers = farmersResponse.success ? farmersResponse.data ?? 0 : 0;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      print('Error loading statistics: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final authService = Provider.of<AuthService>(context);
+    
+    // Role-based access control
+    if (!authService.isAdmin()) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        Navigator.pushReplacementNamed(context, '/login');
+      });
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
     
     return Scaffold(
       appBar: AppBar(
@@ -147,9 +200,10 @@ class AdminDashboardScreen extends StatelessWidget {
                   Icons.inventory,
                   Colors.green,
                   () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Product management coming soon!'),
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AdminProductsScreen(),
                       ),
                     );
                   },
@@ -212,14 +266,16 @@ class AdminDashboardScreen extends StatelessWidget {
                             color: Colors.blue,
                           ),
                           const SizedBox(height: 8),
-                          const Text(
-                            '0',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.blue,
-                            ),
-                          ),
+                          _isLoading
+                              ? const CircularProgressIndicator()
+                              : Text(
+                                  '$_totalUsers',
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue,
+                                  ),
+                                ),
                           Text(
                             'Total Users',
                             style: TextStyle(
@@ -250,14 +306,16 @@ class AdminDashboardScreen extends StatelessWidget {
                             color: Color(0xFF2E7D32),
                           ),
                           const SizedBox(height: 8),
-                          const Text(
-                            '0',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Color(0xFF2E7D32),
-                            ),
-                          ),
+                          _isLoading
+                              ? const CircularProgressIndicator()
+                              : Text(
+                                  '$_totalProducts',
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF2E7D32),
+                                  ),
+                                ),
                           Text(
                             'Products',
                             style: TextStyle(
@@ -292,14 +350,16 @@ class AdminDashboardScreen extends StatelessWidget {
                             color: Colors.orange,
                           ),
                           const SizedBox(height: 8),
-                          const Text(
-                            '0',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.orange,
-                            ),
-                          ),
+                          _isLoading
+                              ? const CircularProgressIndicator()
+                              : Text(
+                                  '$_totalOrders',
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.orange,
+                                  ),
+                                ),
                           Text(
                             'Orders',
                             style: TextStyle(
@@ -330,14 +390,16 @@ class AdminDashboardScreen extends StatelessWidget {
                             color: Colors.purple,
                           ),
                           const SizedBox(height: 8),
-                          const Text(
-                            '0',
-                            style: TextStyle(
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.purple,
-                            ),
-                          ),
+                          _isLoading
+                              ? const CircularProgressIndicator()
+                              : Text(
+                                  '$_totalFarmers',
+                                  style: const TextStyle(
+                                    fontSize: 24,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.purple,
+                                  ),
+                                ),
                           Text(
                             'Farmers',
                             style: TextStyle(

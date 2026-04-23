@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/cart_service.dart';
 import '../buyer/buyer_cart_screen.dart';
+import '../buyer/checkout_screen.dart';
+import '../profile/seller_profile_screen.dart';
 
 class ProductDetailScreen extends StatelessWidget {
   final Map<String, dynamic> product;
@@ -66,13 +68,33 @@ class ProductDetailScreen extends StatelessWidget {
                 children: [
                   const Icon(Icons.person, color: Colors.grey, size: 20),
                   const SizedBox(width: 8),
-                  Text(
-                    'Sold by: ${product['seller_name']}',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: Colors.grey[600],
+                  Expanded(
+                    child: Text(
+                      'Sold by: ${product['seller_name']}',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
                     ),
                   ),
+                  if (product['seller_uid'] != null)
+                    ElevatedButton(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => SellerProfileScreen(
+                              sellerId: product['seller_uid'],
+                            ),
+                          ),
+                        );
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF2E7D32),
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('View Profile'),
+                    ),
                 ],
               ),
             const SizedBox(height: 8),
@@ -189,6 +211,7 @@ class ProductDetailScreen extends StatelessWidget {
                     onPressed: () async {
                       final authService = Provider.of<AuthService>(context, listen: false);
                       final cartService = CartService();
+                      cartService.setAuthToken(authService.token ?? '');
                       
                       try {
                         final buyerUid = authService.currentUser?.uid;
@@ -203,7 +226,6 @@ class ProductDetailScreen extends StatelessWidget {
                         }
                         
                         await cartService.addToCart(
-                          buyerUid: buyerUid,
                           productUid: product['uid'] ?? '',
                           quantity: 1,
                           priceAtTime: double.parse(product['price']?.toString() ?? '0'),
@@ -215,15 +237,13 @@ class ProductDetailScreen extends StatelessWidget {
                               content: const Text('Added to cart!'),
                               backgroundColor: Colors.green,
                               action: SnackBarAction(
-                                label: 'Go Cart',
+                                label: 'View Cart',
                                 textColor: Colors.white,
                                 onPressed: () {
                                   Navigator.push(
                                     context,
                                     MaterialPageRoute(
-                                      builder: (context) => BuyerCartScreen(
-                                        buyerUid: buyerUid,
-                                      ),
+                                      builder: (context) => const BuyerCartScreen(),
                                     ),
                                   );
                                 },
@@ -263,13 +283,46 @@ class ProductDetailScreen extends StatelessWidget {
                 const SizedBox(width: 12),
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Buy Now feature coming soon!'),
-                          backgroundColor: const Color(0xFF2E7D32),
-                        ),
-                      );
+                    onPressed: () async {
+                      try {
+                        final authService = Provider.of<AuthService>(context, listen: false);
+                        final cartService = CartService();
+                        
+                        // Set auth token
+                        cartService.setAuthToken(authService.token ?? '');
+                        
+                        // Add product to cart with quantity 1
+                        await cartService.addToCart(
+                          productUid: product['uid'],
+                          quantity: 1,
+                          priceAtTime: product['price'],
+                        );
+                        
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Added to cart'),
+                              backgroundColor: const Color(0xFF2E7D32),
+                            ),
+                          );
+                          // Navigate to checkout
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => const CheckoutScreen(),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Failed to add to cart: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      }
                     },
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFF2E7D32),

@@ -18,21 +18,21 @@ class HamburgerMenu extends StatelessWidget {
       onSelected: (value) {
         switch (value) {
           case 'edit_profile':
-            if (authService.currentUser?.userType == 'consumer') {
+            if (authService.isBuyer()) {
               Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (context) => const ConsumerMyProfileScreen(),
                 ),
               );
-            } else if (authService.currentUser?.userType == 'farmer') {
+            } else if (authService.isSeller()) {
               Navigator.push(
                 context,
                 MaterialPageRoute(
                   builder: (context) => const FarmerMyProfileScreen(),
                 ),
               );
-            } else if (authService.currentUser?.userType == 'admin') {
+            } else if (authService.isAdmin()) {
               // Admin profile would go here when created
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(content: Text('Admin profile coming soon!')),

@@ -7,14 +7,9 @@ class CartService {
   static const String baseUrl = 'http://localhost:8000';
   static const Duration timeout = Duration(seconds: 30);
   String? _token;
-  String? _buyerUid;
 
   void setAuthToken(String token) {
     _token = token;
-  }
-
-  void setBuyerUid(String buyerUid) {
-    _buyerUid = buyerUid;
   }
 
   Map<String, String> get _headers {
@@ -26,12 +21,9 @@ class CartService {
   }
 
   Future<CartSummary> getCartSummary() async {
-    if (_buyerUid == null) {
-      throw Exception('Buyer UID not set');
-    }
-    print('🛒 Getting cart summary for buyer: $_buyerUid');
+    print('🛒 Getting cart summary');
     final response = await http.get(
-      Uri.parse('$baseUrl/api/cart/summary?buyer_uid=$_buyerUid'),
+      Uri.parse('$baseUrl/api/cart/summary'),
       headers: _headers,
     ).timeout(timeout);
     print('📥 Cart summary response: ${response.statusCode}');
@@ -44,12 +36,9 @@ class CartService {
   }
 
   Future<List<CartItem>> getCartItems() async {
-    if (_buyerUid == null) {
-      throw Exception('Buyer UID not set');
-    }
-    print('🛒 Getting cart items for buyer: $_buyerUid');
+    print('🛒 Getting cart items');
     final response = await http.get(
-      Uri.parse('$baseUrl/api/cart/?buyer_uid=$_buyerUid'),
+      Uri.parse('$baseUrl/api/cart/'),
       headers: _headers,
     ).timeout(timeout);
     print('📥 Cart items response: ${response.statusCode}');
@@ -64,19 +53,17 @@ class CartService {
   }
 
   Future<CartItem> addToCart({
-    required String buyerUid,
     required String productUid,
     required int quantity,
     required double priceAtTime,
   }) async {
-    print('🛒 Adding to cart: buyer=$buyerUid, product=$productUid, qty=$quantity, price=$priceAtTime');
+    print('🛒 Adding to cart: product=$productUid, qty=$quantity, price=$priceAtTime');
     print('🌐 POST URL: $baseUrl/api/cart/items');
     
     final response = await http.post(
       Uri.parse('$baseUrl/api/cart/items'),
       headers: _headers,
       body: jsonEncode({
-        'buyer_uid': buyerUid,
         'product_uid': productUid,
         'quantity': quantity,
         'price_at_time': priceAtTime,
@@ -94,12 +81,9 @@ class CartService {
   }
 
   Future<CartItem> updateCartItem(String itemUid, int quantity) async {
-    if (_buyerUid == null) {
-      throw Exception('Buyer UID not set');
-    }
     print('🛒 Updating cart item: $itemUid to qty=$quantity');
     final response = await http.put(
-      Uri.parse('$baseUrl/api/cart/items/$itemUid?buyer_uid=$_buyerUid'),
+      Uri.parse('$baseUrl/api/cart/items/$itemUid'),
       headers: _headers,
       body: jsonEncode({'quantity': quantity}),
     ).timeout(timeout);
@@ -113,12 +97,9 @@ class CartService {
   }
 
   Future<void> removeFromCart(String itemUid) async {
-    if (_buyerUid == null) {
-      throw Exception('Buyer UID not set');
-    }
     print('🛒 Removing cart item: $itemUid');
     final response = await http.delete(
-      Uri.parse('$baseUrl/api/cart/items/$itemUid?buyer_uid=$_buyerUid'),
+      Uri.parse('$baseUrl/api/cart/items/$itemUid'),
       headers: _headers,
     ).timeout(timeout);
     print('📥 Remove response: ${response.statusCode}');
@@ -131,12 +112,9 @@ class CartService {
   }
 
   Future<void> clearCart() async {
-    if (_buyerUid == null) {
-      throw Exception('Buyer UID not set');
-    }
-    print('🛒 Clearing cart for buyer: $_buyerUid');
+    print('🛒 Clearing cart');
     final response = await http.delete(
-      Uri.parse('$baseUrl/api/cart/?buyer_uid=$_buyerUid'),
+      Uri.parse('$baseUrl/api/cart/'),
       headers: _headers,
     ).timeout(timeout);
     print('📥 Clear cart response: ${response.statusCode}');

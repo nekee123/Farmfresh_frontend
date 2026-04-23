@@ -5,13 +5,11 @@ import '../../services/cart_service.dart';
 import '../../services/api_service.dart';
 import '../../models/cart_item.dart';
 import '../../models/cart_summary.dart';
+import '../orders/consumer_orders_screen.dart';
 
 class CheckoutScreen extends StatefulWidget {
-  final String buyerUid;
-
   const CheckoutScreen({
     super.key,
-    required this.buyerUid,
   });
 
   @override
@@ -30,8 +28,34 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   @override
   void initState() {
     super.initState();
-    _cartService.setBuyerUid(widget.buyerUid);
     _loadCart();
+  }
+
+  Future<void> _loadCart() async {
+    setState(() => _isLoading = true);
+    
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      _cartService.setAuthToken(authService.token ?? '');
+      
+      final cartItems = await _cartService.getCartItems();
+      final cartSummary = await _cartService.getCartSummary();
+      
+      setState(() {
+        _cartItems = cartItems;
+        _cartSummary = cartSummary;
+        _isLoading = false;
+      });
+      
+      _extractPaymentMethods();
+    } catch (e) {
+      setState(() => _isLoading = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading cart: $e')),
+        );
+      }
+    }
   }
 
   String _formatPaymentMethod(String method) {
@@ -65,31 +89,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     }
   }
 
-  Future<void> _loadCart() async {
-    setState(() => _isLoading = true);
-    
-    try {
-      final cartItems = await _cartService.getCartItems();
-      final cartSummary = await _cartService.getCartSummary();
-      
-      setState(() {
-        _cartItems = cartItems;
-        _cartSummary = cartSummary;
-        _isLoading = false;
-      });
-      
-      // Extract payment methods after loading cart
-      _extractPaymentMethods();
-    } catch (e) {
-      setState(() => _isLoading = false);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error loading cart: $e')),
-        );
-      }
-    }
-  }
-
   Future<void> _placeOrder() async {
     setState(() => _isProcessing = true);
     
@@ -101,14 +100,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         final product = item.product;
         if (product == null) continue;
         
+        print('🛒 Product data keys: ${product.keys.toList()}');
+        print('🛒 Full product data: $product');
+        
         final orderData = {
-          'buyer_uid': widget.buyerUid,
           'buyer_name': authService.currentUser?.name ?? 'Unknown',
           'buyer_contact': authService.currentUser?.phoneNumber ?? '',
           'farm_product_uid': item.productUid,
           'farm_product_name': product['name'] ?? 'Unknown',
-          'seller_uid': product['seller_uid'] ?? '',
-          'seller_name': product['seller_name'] ?? 'Unknown',
+          'seller_uid': product['seller_uid'] ?? product['seller_id'] ?? product['uid'] ?? '',
+          'seller_name': product['seller_name'] ?? product['seller'] ?? 'Unknown',
           'seller_contact': '',
           'quantity': item.quantity,
           'total_price': item.quantity * item.priceAtTime,
@@ -118,14 +119,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         print('🛒 Creating order with payment method: "$_selectedPaymentMethod"');
         print('🛒 Product payment methods: ${product['payment_methods']}');
         print('🛒 Available methods: $_availablePaymentMethods');
+        print('🛒 Order data: $orderData');
         
         final response = await ApiService.createOrder(orderData);
         
+        print('🛒 Order response - success: ${response.success}, error: ${response.error}, data: ${response.data}');
+        
         if (!response.success) {
           if (mounted) {
+            final errorMessage = response.error ?? 'Unknown error (backend returned success=false without error message)';
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text('Failed to place order: ${response.error}'),
+                content: Text('Failed to place order: $errorMessage'),
                 backgroundColor: Colors.red,
               ),
             );
@@ -144,7 +149,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.popUntil(context, (route) => route.isFirst);
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (context) => const ConsumerOrdersScreen()),
+          (route) => route.isFirst,
+        );
       }
     } catch (e) {
       if (mounted) {

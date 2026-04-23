@@ -158,8 +158,6 @@ class _AddProductScreenState extends State<AddProductScreen> {
         'description': _descriptionController.text,
         'image': _selectedImageBase64 ?? 'default.jpg',
         'payment_methods': _selectedPaymentMethod ?? 'CASH_ON_DELIVERY', // Use dropdown selection
-        'seller_uid': sellerId,
-        'seller_name': authService.currentUser?.name ?? 'Unknown Seller',
       };
 
       final isEditing = widget.product != null;
@@ -169,8 +167,6 @@ class _AddProductScreenState extends State<AddProductScreen> {
       print('   - type: ${productData['type']}');
       print('   - price: ${productData['price']}');
       print('   - quantity: ${productData['quantity']}');
-      print('   - seller_uid: ${productData['seller_uid']}');
-      print('   - seller_name: ${productData['seller_name']}');
       print('   - payment_methods: ${productData['payment_methods']}');
 
       ApiResponse<Map<String, dynamic>> response;
@@ -201,9 +197,17 @@ class _AddProductScreenState extends State<AddProductScreen> {
         }
       } else {
         print('❌ Product ${isEditing ? 'update' : 'creation'} failed: ${response.error}');
+        
+        // Check if error is due to permission issue (403 Forbidden)
+        String errorMessage = response.error ?? 'Unknown error';
+        if (errorMessage.contains('403') || errorMessage.toLowerCase().contains('forbidden') || 
+            errorMessage.toLowerCase().contains('permission') || errorMessage.toLowerCase().contains('only sellers')) {
+          errorMessage = 'Only sellers can create products. Please log in with a seller account.';
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed to ${isEditing ? 'update' : 'add'} product: ${response.error}'),
+            content: Text('Failed to ${isEditing ? 'update' : 'add'} product: $errorMessage'),
             backgroundColor: Colors.red,
           ),
         );

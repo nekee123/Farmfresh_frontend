@@ -1,15 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../../services/cart_service.dart';
+import '../../services/auth_service.dart';
 import '../../models/cart_item.dart';
 import '../../models/cart_summary.dart';
 import 'checkout_screen.dart';
 
 class BuyerCartScreen extends StatefulWidget {
-  final String buyerUid;
-  
   const BuyerCartScreen({
     super.key,
-    required this.buyerUid,
   });
 
   @override
@@ -25,7 +24,6 @@ class _BuyerCartScreenState extends State<BuyerCartScreen> {
   @override
   void initState() {
     super.initState();
-    _cartService.setBuyerUid(widget.buyerUid);
     _loadCart();
   }
 
@@ -33,6 +31,9 @@ class _BuyerCartScreenState extends State<BuyerCartScreen> {
     setState(() => _isLoading = true);
     
     try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      _cartService.setAuthToken(authService.token ?? '');
+      
       final cartItems = await _cartService.getCartItems();
       final cartSummary = await _cartService.getCartSummary();
       
@@ -308,7 +309,7 @@ class _BuyerCartScreenState extends State<BuyerCartScreen> {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => CheckoutScreen(buyerUid: widget.buyerUid),
+                    builder: (context) => const CheckoutScreen(),
                   ),
                 );
               },

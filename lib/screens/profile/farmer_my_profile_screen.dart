@@ -1,7 +1,10 @@
+import 'dart:typed_data';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../services/auth_service.dart';
+import '../../services/api_service.dart';
 import '../../widgets/custom_button.dart';
 
 class FarmerMyProfileScreen extends StatefulWidget {
@@ -20,7 +23,7 @@ class _FarmerMyProfileScreenState extends State<FarmerMyProfileScreen> {
   final _newPasswordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   
-  String? _profileImagePath;
+  Uint8List? _profileImageBytes;
   bool _isLoading = false;
   bool _showPasswordSection = false;
 
@@ -41,12 +44,56 @@ class _FarmerMyProfileScreenState extends State<FarmerMyProfileScreen> {
     super.dispose();
   }
 
-  void _loadUserData() {
+  Future<void> _loadUserData() async {
     final user = Provider.of<AuthService>(context, listen: false).currentUser;
     if (user != null) {
       _nameController.text = user.name ?? '';
       _phoneController.text = user.phoneNumber ?? '';
       _locationController.text = user.location ?? '';
+      
+      // Load profile picture from user
+      if (user.profilePicture != null && user.profilePicture!.isNotEmpty) {
+        try {
+          // Decode base64 string to bytes
+          final base64String = user.profilePicture!.split(',').last;
+          final bytes = base64Decode(base64String);
+          if (mounted) {
+            setState(() {
+              _profileImageBytes = bytes;
+            });
+          }
+        } catch (e) {
+          print('Error decoding profile picture: $e');
+        }
+      }
+      
+      // Try to fetch actual user profile from backend to get correct name
+      try {
+        final profileResponse = await ApiService.getCurrentUserProfile();
+        if (profileResponse.success && profileResponse.data != null) {
+          final profileData = profileResponse.data!;
+          if (mounted) {
+            setState(() {
+              _nameController.text = profileData['full_name'] ?? profileData['name'] ?? _nameController.text;
+              _phoneController.text = profileData['phone_number'] ?? _phoneController.text;
+              _locationController.text = profileData['location'] ?? _locationController.text;
+              
+              // Also load profile picture from backend response
+              if (profileData['profile_picture'] != null && profileData['profile_picture'].isNotEmpty) {
+                try {
+                  final base64String = profileData['profile_picture'].split(',').last;
+                  final bytes = base64Decode(base64String);
+                  _profileImageBytes = bytes;
+                } catch (e) {
+                  print('Error decoding profile picture from backend: $e');
+                }
+              }
+            });
+          }
+        }
+      } catch (e) {
+        print('Error fetching user profile: $e');
+      }
     }
   }
 
@@ -55,14 +102,27 @@ class _FarmerMyProfileScreenState extends State<FarmerMyProfileScreen> {
       final ImagePicker picker = ImagePicker();
       final XFile? image = await picker.pickImage(source: ImageSource.gallery);
       if (image != null) {
-        setState(() {
-          _profileImagePath = image.path;
-        });
+        final bytes = await image.readAsBytes();
+        if (mounted) {
+          setState(() {
+            _profileImageBytes = bytes;
+          });
+        }
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error picking image: $e')),
       );
+    }
+  }
+
+  String? _imageToBase64(Uint8List? bytes) {
+    if (bytes == null) return null;
+    try {
+      final base64 = base64Encode(bytes);
+      return 'data:image/jpeg;base64,$base64';
+    } catch (e) {
+      return null;
     }
   }
 
@@ -73,13 +133,14 @@ class _FarmerMyProfileScreenState extends State<FarmerMyProfileScreen> {
 
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
+      final profilePictureBase64 = _imageToBase64(_profileImageBytes);
       
-      // Update user profile (you'll need to implement this in AuthService)
+      // Update user profile
       await authService.updateUserProfile(
         name: _nameController.text.trim(),
         phoneNumber: _phoneController.text.trim(),
         location: _locationController.text.trim(),
-        profileImagePath: _profileImagePath,
+        profileImagePath: profilePictureBase64,
       );
 
       if (mounted) {
@@ -200,10 +261,10 @@ class _FarmerMyProfileScreenState extends State<FarmerMyProfileScreen> {
                               color: Colors.grey[200],
                               border: Border.all(color: const Color(0xFF2E7D32), width: 3),
                             ),
-                            child: _profileImagePath != null
+                            child: _profileImageBytes != null
                                 ? ClipOval(
-                                    child: Image.asset(
-                                      _profileImagePath!,
+                                    child: Image.memory(
+                                      _profileImageBytes!,
                                       fit: BoxFit.cover,
                                       errorBuilder: (context, error, stackTrace) {
                                         return const Icon(Icons.agriculture, size: 50, color: Colors.grey);

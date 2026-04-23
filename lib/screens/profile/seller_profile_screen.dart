@@ -1,26 +1,26 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../../services/auth_service.dart';
 import '../../services/api_service.dart';
-import '../../models/user.dart';
-import '../../models/review.dart';
-import '../../models/product.dart';
 import '../../models/seller.dart';
 import '../../models/seller_rating.dart';
-import '../../models/api_response.dart';
-import '../../widgets/custom_button.dart';
+import '../../models/review.dart';
+import '../products/product_list_screen.dart';
 import '../products/product_detail_screen.dart';
+import '../orders/consumer_orders_screen.dart';
+import '../chat/chat_screen.dart';
+import '../../widgets/hamburger_menu.dart';
+import '../../widgets/custom_button.dart';
 
 class SellerProfileScreen extends StatefulWidget {
   final String sellerId;
   final String? buyerId;
-  final String initialTab;
 
   const SellerProfileScreen({
     super.key,
     required this.sellerId,
     this.buyerId,
-    this.initialTab = 'products',
   });
 
   @override
@@ -75,15 +75,13 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
   Seller? _seller;
   SellerRating? _sellerRating;
   List<Review> _reviews = [];
-  List<FarmProduct> _products = [];
+  List<Map<String, dynamic>> _products = [];
   bool _isLoading = true;
   String? _errorMessage;
-  late String _selectedTab;
 
   @override
   void initState() {
     super.initState();
-    _selectedTab = widget.initialTab;
     _loadSellerData();
   }
 
@@ -94,41 +92,88 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
     });
 
     try {
-      // Load seller profile
-      final sellerResponse = await ApiService.getSellerProfile(widget.sellerId);
+      print('🔍 Loading seller data for sellerId: ${widget.sellerId}');
       
       // Load seller rating
       final ratingResponse = await ApiService.getSellerRating(widget.sellerId);
-      
+      print('📊 Rating response success: ${ratingResponse.success}, data: ${ratingResponse.data}');
+
       // Load seller reviews
       final reviewsResponse = await ApiService.getSellerReviews(widget.sellerId);
-      
-      // Load seller products
-      final productsResponse = await ApiService.getAllProducts();
+      print('📝 Reviews response success: ${reviewsResponse.success}');
+      print('📝 Reviews response data: ${reviewsResponse.data}');
+      print('📝 Reviews response error: ${reviewsResponse.error}');
+
+      // Load all products
+      final productsResponse = await ApiService.getProducts();
+      print('📦 Products response success: ${productsResponse.success}');
 
       if (mounted) {
         setState(() {
-          _seller = sellerResponse.data;
-          _sellerRating = ratingResponse.success ? SellerRating(
-            averageRating: ratingResponse.data ?? 0.0,
-            totalReviews: 0,
-            fiveStar: 0,
-            fourStar: 0,
-            threeStar: 0,
-            twoStar: 0,
-            oneStar: 0,
-          ) : null;
-          _reviews = reviewsResponse.success && reviewsResponse.data != null 
-              ? reviewsResponse.data!.map((item) => Review.fromJson(item)).toList()
+          // Extract seller info from raw product data
+          final sellerProductData = productsResponse.success && productsResponse.data != null
+              ? productsResponse.data!.firstWhere(
+                  (product) => product['seller_uid'] == widget.sellerId,
+                  orElse: () => {},
+                )
+              : {};
+          
+          final sellerName = sellerProductData['seller_name'] ?? 'Seller';
+          final sellerLocation = sellerProductData['seller_location'] ?? '';
+          final sellerPhone = sellerProductData['seller_contact'] ?? '';
+          final sellerProfilePicture = sellerProductData['seller_profile_picture'] ?? '';
+          
+          _seller = Seller(
+            uid: widget.sellerId,
+            name: sellerName,
+            location: sellerLocation,
+            phoneNumber: sellerPhone,
+            profilePicture: sellerProfilePicture,
+          );
+          print('📝 Parsing reviews...');
+          _reviews = reviewsResponse.success && reviewsResponse.data != null
+              ? reviewsResponse.data!.map((item) {
+                  print('📝 Review item: $item');
+                  return Review.fromJson(item);
+                }).toList()
               : [];
-          _products = productsResponse.success && productsResponse.data != null 
-              ? productsResponse.data!.where((product) => product['seller_id'] == widget.sellerId)
-                  .map((item) => FarmProduct.fromJson(item)).toList()
+          print('📝 Final reviews count: ${_reviews.length}');
+
+          // Calculate actual average rating and review count from fetched reviews
+          final actualReviewCount = _reviews.length;
+          final actualAverageRating = actualReviewCount > 0
+              ? _reviews.map((r) => r.rating).reduce((a, b) => a + b) / actualReviewCount
+              : 0.0;
+
+          // Count ratings by star level
+          final fiveStarCount = _reviews.where((r) => r.rating == 5).length;
+          final fourStarCount = _reviews.where((r) => r.rating == 4).length;
+          final threeStarCount = _reviews.where((r) => r.rating == 3).length;
+          final twoStarCount = _reviews.where((r) => r.rating == 2).length;
+          final oneStarCount = _reviews.where((r) => r.rating == 1).length;
+
+          print('📊 Calculated average rating: $actualAverageRating');
+          print('📊 Total reviews: $actualReviewCount');
+          print('� Rating breakdown: 5★=$fiveStarCount, 4★=$fourStarCount, 3★=$threeStarCount, 2★=$twoStarCount, 1★=$oneStarCount');
+
+          _sellerRating = SellerRating(
+            averageRating: actualAverageRating,
+            totalReviews: actualReviewCount,
+            fiveStar: fiveStarCount,
+            fourStar: fourStarCount,
+            threeStar: threeStarCount,
+            twoStar: twoStarCount,
+            oneStar: oneStarCount,
+          );
+          
+          _products = productsResponse.success && productsResponse.data != null
+              ? productsResponse.data!.where((product) => product['seller_uid'] == widget.sellerId).toList()
               : [];
           _isLoading = false;
         });
       }
     } catch (e) {
+      print('🚨 Error loading seller data: $e');
       if (mounted) {
         setState(() {
           _errorMessage = 'Failed to load seller profile: ${e.toString()}';
@@ -150,7 +195,18 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
           if (widget.buyerId != null)
             IconButton(
               icon: const Icon(Icons.message),
-              onPressed: _showContactDialog,
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatScreen(
+                      sellerId: widget.sellerId,
+                      sellerName: _seller?.name,
+                      sellerProfilePicture: _seller?.profilePicture,
+                    ),
+                  ),
+                );
+              },
               tooltip: 'Contact Seller',
             ),
         ],
@@ -204,20 +260,20 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildSellerInfo(),
+            _buildProfileHeader(),
             const SizedBox(height: 24),
-            _buildRatingSection(),
+            _buildSellerBio(),
             const SizedBox(height: 24),
-            _buildTabBar(),
-            const SizedBox(height: 16),
-            _buildTabContent(),
+            _buildProductsSection(),
+            const SizedBox(height: 24),
+            _buildReviewsSection(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildSellerInfo() {
+  Widget _buildProfileHeader() {
     if (_seller == null) return const SizedBox();
 
     return Card(
@@ -251,45 +307,83 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        _seller!.location ?? '',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[600],
-                        ),
-                      ),
-                      if (_seller!.phoneNumber.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          _seller!.phoneNumber,
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[600],
+                      Row(
+                        children: [
+                          Icon(Icons.star, color: const Color(0xFFFFD700), size: 16),
+                          const SizedBox(width: 4),
+                          Text(
+                            _sellerRating?.averageRating.toStringAsFixed(1) ?? '0.0',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.grey[700],
+                            ),
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 8),
+                          Text(
+                            '(${_sellerRating?.totalReviews ?? 0} reviews)',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(Icons.shopping_bag, color: Colors.grey[600], size: 16),
+                          const SizedBox(width: 4),
+                          Text(
+                            '${_products.length} orders',
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Icon(Icons.location_on, color: Colors.grey[600], size: 16),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              _seller!.location ?? 'Location not specified',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
                     ],
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
-            Text(
-              'About this seller',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey[800],
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Professional farmer specializing in fresh, high-quality agricultural products. '
-              'Committed to sustainable farming practices and customer satisfaction.',
-              style: TextStyle(
-                fontSize: 14,
-                color: Colors.grey[600],
-                height: 1.4,
+            ElevatedButton.icon(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (context) => ChatScreen(
+                      sellerId: widget.sellerId,
+                      sellerName: _seller?.name,
+                      sellerProfilePicture: _seller?.profilePicture,
+                    ),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.message),
+              label: const Text('Message Seller'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white,
+                minimumSize: const Size(double.infinity, 40),
               ),
             ),
           ],
@@ -298,8 +392,8 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
     );
   }
 
-  Widget _buildRatingSection() {
-    if (_sellerRating == null) return const SizedBox();
+  Widget _buildSellerBio() {
+    if (_seller == null) return const SizedBox();
 
     return Card(
       elevation: 4,
@@ -310,328 +404,236 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Seller Rating',
+              'About Seller',
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
                 color: Color(0xFF2E7D32),
               ),
             ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(height: 12),
+            Text(
+              'Professional farmer specializing in fresh, high-quality agricultural products. '
+              'Committed to sustainable farming practices and customer satisfaction.',
+              style: TextStyle(
+                fontSize: 14,
+                color: Colors.grey[700],
+                height: 1.5,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProductsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Products',
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF2E7D32),
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (_products.isEmpty)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(40),
+              child: Text(
+                'No products available',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey,
+                ),
+              ),
+            ),
+          )
+        else
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _products.length,
+            itemBuilder: (context, index) {
+              final product = _products[index];
+              return _buildProductCard(product);
+            },
+          ),
+      ],
+    );
+  }
+
+  Widget _buildProductCard(Map<String, dynamic> product) {
+    return Card(
+      elevation: 2,
+      margin: const EdgeInsets.only(bottom: 12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(12.0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: Colors.grey[200],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: _buildImageWidget(
+                product['image'],
+                fit: BoxFit.cover,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product['name'] ?? 'Unknown',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    product['type'] ?? '',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
                     children: [
+                      const Icon(Icons.star, color: Color(0xFFFFD700), size: 14),
+                      const SizedBox(width: 4),
                       Text(
-                        _sellerRating!.averageRating.toStringAsFixed(1),
-                        style: const TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF2E7D32),
+                        '4.5',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.grey[700],
                         ),
                       ),
+                      const SizedBox(width: 8),
                       Text(
-                        '${_sellerRating!.totalReviews} reviews',
+                        '${product['quantity'] ?? 0} sold',
                         style: TextStyle(
-                          fontSize: 14,
+                          fontSize: 12,
                           color: Colors.grey[600],
                         ),
                       ),
                     ],
                   ),
-                ),
-                const SizedBox(width: 24),
-                _buildStarRating(),
-              ],
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        '₱${(product['price'] ?? 0).toStringAsFixed(0)}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF2E7D32),
+                          fontSize: 16,
+                        ),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(context).push(
+                            MaterialPageRoute(
+                              builder: (context) => ProductDetailScreen(
+                                product: product,
+                              ),
+                            ),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2E7D32),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          minimumSize: const Size(80, 32),
+                        ),
+                        child: const Text(
+                          'Add to Cart',
+                          style: TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(height: 16),
-            _buildRatingBreakdown(),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildStarRating() {
+  Widget _buildReviewsSection() {
     return Column(
-      children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: List.generate(5, (index) {
-            return Icon(
-              index < _sellerRating!.averageRating.floor()
-                  ? Icons.star
-                  : Icons.star_border,
-              color: const Color(0xFFFFD700),
-              size: 24,
-            );
-          }),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          _getRatingDescription(_sellerRating!.averageRating),
-          style: TextStyle(
-            fontSize: 14,
-            color: Colors.grey[600],
-            fontStyle: FontStyle.italic,
-          ),
-        ),
-      ],
-    );
-  }
-
-  String _getRatingDescription(double rating) {
-    if (rating >= 4.5) return 'Excellent';
-    if (rating >= 4.0) return 'Very Good';
-    if (rating >= 3.5) return 'Good';
-    if (rating >= 3.0) return 'Fair';
-    if (rating >= 2.0) return 'Poor';
-    return 'Very Poor';
-  }
-
-  Widget _buildRatingBreakdown() {
-    return Column(
-      children: [
-        _buildRatingBar('5 stars', _sellerRating!.fiveStar, Colors.green),
-        _buildRatingBar('4 stars', _sellerRating!.fourStar, Colors.lightGreen),
-        _buildRatingBar('3 stars', _sellerRating!.threeStar, Colors.yellow),
-        _buildRatingBar('2 stars', _sellerRating!.twoStar, Colors.orange),
-        _buildRatingBar('1 star', _sellerRating!.oneStar, Colors.red),
-      ],
-    );
-  }
-
-  Widget _buildRatingBar(String label, int count, Color color) {
-    final percentage = _sellerRating!.totalReviews > 0 
-        ? (count / _sellerRating!.totalReviews) * 100 
-        : 0.0;
-
-    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text(label),
-            Text('$count (${percentage.toStringAsFixed(1)}%)'),
+            const Text(
+              'Reviews',
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: Color(0xFF2E7D32),
+              ),
+            ),
+            if (_reviews.length > 3)
+              TextButton(
+                onPressed: () {
+                  // TODO: Navigate to all reviews page
+                },
+                child: const Text(
+                  'See All',
+                  style: TextStyle(
+                    color: Color(0xFF2E7D32),
+                  ),
+                ),
+              ),
           ],
-        ),
-        const SizedBox(height: 4),
-        LinearProgressIndicator(
-          value: percentage / 100,
-          backgroundColor: Colors.grey[300],
-          valueColor: AlwaysStoppedAnimation<Color>(color),
-          minHeight: 8,
         ),
         const SizedBox(height: 12),
+        if (_reviews.isEmpty)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(40),
+              child: Text(
+                'No reviews yet',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey,
+                ),
+              ),
+            ),
+          )
+        else
+          ListView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: _reviews.length > 3 ? 3 : _reviews.length,
+            itemBuilder: (context, index) {
+              final review = _reviews[index];
+              return _buildReviewCard(review);
+            },
+          ),
       ],
-    );
-  }
-
-  Widget _buildTabBar() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: _buildTabButton('Products', 'products'),
-          ),
-          Expanded(
-            child: _buildTabButton('Reviews', 'reviews'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTabButton(String label, String value) {
-    final isSelected = _selectedTab == value;
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          _selectedTab = value;
-        });
-      },
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF2E7D32) : Colors.transparent,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
-        ),
-        child: Text(
-          label,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.grey[600],
-            fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTabContent() {
-    switch (_selectedTab) {
-      case 'products':
-        return _buildProductsGrid();
-      case 'reviews':
-        return _buildReviewsList();
-      default:
-        return const SizedBox();
-    }
-  }
-
-  Widget _buildProductsGrid() {
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        childAspectRatio: 0.75,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-      ),
-      itemCount: _products.length,
-      itemBuilder: (context, index) {
-        final product = _products[index];
-        return _buildProductCard(product);
-      },
-    );
-  }
-
-  Widget _buildProductCard(FarmProduct product) {
-    return Card(
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: InkWell(
-        onTap: () {
-          // Navigate to product detail
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (context) => ProductDetailScreen(
-                product: product,
-                buyerId: widget.buyerId,
-                sellerId: widget.sellerId,
-                isFarmerView: false,
-                isAdminView: false,
-              ),
-            ),
-          );
-        },
-        borderRadius: BorderRadius.circular(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              flex: 3,
-              child: Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  color: Colors.grey[200],
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                ),
-                child: _buildImageWidget(
-                  product.image,
-                  fit: BoxFit.cover,
-                ),
-              ),
-            ),
-            Expanded(
-              flex: 2,
-              child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      product.name,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      product.type,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                    const Spacer(),
-                    Text(
-                      '₱${product.price.toStringAsFixed(0)}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        color: Color(0xFF2E7D32),
-                        fontSize: 14,
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: product.quantity > 0 
-                            ? Colors.green.withOpacity(0.1)
-                            : Colors.red.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        'Qty: ${product.quantity}',
-                        style: TextStyle(
-                          fontSize: 10,
-                          color: product.quantity > 0 ? Colors.green : Colors.red,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildReviewsList() {
-    if (_reviews.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.rate_review_outlined,
-              size: 64,
-              color: Colors.grey[400],
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No reviews yet',
-              style: TextStyle(
-                fontSize: 16,
-                color: Colors.grey[600],
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      itemCount: _reviews.length,
-      itemBuilder: (context, index) {
-        final review = _reviews[index];
-        return _buildReviewCard(review);
-      },
     );
   }
 
@@ -650,7 +652,7 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
                 CircleAvatar(
                   radius: 20,
                   backgroundImage: _imageProviderFromString(review.buyerProfilePicture),
-                  child: review.buyerProfilePicture.isEmpty
+                  child: (review.buyerProfilePicture == null || review.buyerProfilePicture?.isEmpty == true)
                       ? Icon(Icons.person, size: 20, color: Colors.grey[400])
                       : null,
                 ),

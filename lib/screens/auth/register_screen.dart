@@ -16,7 +16,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _locationController = TextEditingController();
-  bool _isFarmer = false;
+  String _selectedRole = 'buyer';
   bool _isLoading = false;
 
   @override
@@ -46,39 +46,27 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
-      bool success = false;
-
-      if (_isFarmer) {
-        success = await authService.registerSeller(
-          _nameController.text,
-          _phoneController.text,
-          _passwordController.text,
-          _locationController.text,
-        );
-      } else {
-        success = await authService.registerBuyer(
-          _nameController.text,
-          _phoneController.text,
-          _passwordController.text,
-          _locationController.text,
-        );
-      }
+      
+      final success = await authService.register(
+        _nameController.text,
+        _phoneController.text,
+        _passwordController.text,
+        _locationController.text,
+        role: _selectedRole,
+      );
 
       if (!mounted) return;
 
       if (success) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Registration successful!'),
+            content: Text('Registration successful! Please login.'),
             backgroundColor: Colors.green,
           ),
         );
         
-        // Navigate to appropriate dashboard
-        Navigator.pushReplacementNamed(
-          context, 
-          _isFarmer ? '/farmer_dashboard' : '/consumer_dashboard'
-        );
+        // Navigate to login screen
+        Navigator.pushReplacementNamed(context, '/login');
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -192,53 +180,25 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       key: _formKey,
                       child: Column(
                         children: [
-                          // User Type Toggle
-                          Row(
-                            children: [
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () => setState(() => _isFarmer = false),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    decoration: BoxDecoration(
-                                      color: !_isFarmer ? const Color(0xFF2E7D32) : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      'Buyer',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: !_isFarmer ? Colors.white : Colors.grey[600],
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                          // Role Selection Dropdown
+                          DropdownButtonFormField<String>(
+                            value: _selectedRole,
+                            decoration: InputDecoration(
+                              labelText: 'I want to register as',
+                              prefixIcon: const Icon(Icons.person_outline),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
                               ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () => setState(() => _isFarmer = true),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    decoration: BoxDecoration(
-                                      color: _isFarmer ? const Color(0xFF2E7D32) : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      'Farmer',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: _isFarmer ? Colors.white : Colors.grey[600],
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
+                            ),
+                            items: const [
+                              DropdownMenuItem(value: 'buyer', child: Text('Buyer')),
+                              DropdownMenuItem(value: 'seller', child: Text('Seller/Farmer')),
                             ],
+                            onChanged: (value) {
+                              setState(() => _selectedRole = value!);
+                            },
                           ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 16),
                           // Name Field
                           TextFormField(
                             controller: _nameController,

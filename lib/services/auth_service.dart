@@ -9,9 +9,16 @@ class AuthService extends ChangeNotifier {
   static const _secureStorage = FlutterSecureStorage();
   User? _currentUser;
   String? _errorMessage;
+  String? _token;
 
   User? get currentUser => _currentUser;
   String? get errorMessage => _errorMessage;
+  String? get token => _token;
+
+  bool isAdmin() => _currentUser?.userType == 'admin';
+  bool isSeller() => _currentUser?.userType == 'seller' || _currentUser?.userType == 'farmer';
+  bool isBuyer() => _currentUser?.userType == 'buyer' || _currentUser?.userType == 'consumer';
+  String? getUserRole() => _currentUser?.userType;
 
   void _setLoading(bool loading) {
     // Could add loading state management here if needed
@@ -26,98 +33,59 @@ class AuthService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<bool> loginBuyer(String phoneNumber, String password) async {
+  Future<bool> login(String phoneNumber, String password) async {
     _setLoading(true);
     _clearError();
 
     try {
-      print('🔐 Attempting buyer login with phone: $phoneNumber');
+      print('🔐 Attempting unified login for: $phoneNumber');
       
       final loginData = {
         'phone_number': phoneNumber,
         'password': password,
       };
 
-      print('📤 Sending login data: $loginData');
-      final response = await ApiService.loginBuyer(loginData);
-
-      print('📥 Response received: success=${response.success}, error=${response.error}');
-      if (response.data != null) {
-        print('📊 User data: ${response.data}');
-      }
+      final response = await ApiService.login(loginData);
 
       if (response.success && response.data != null) {
-        // Backend returns: {uid, name, phone_number}
-        final userData = response.data!;
+        final data = response.data!;
+        final token = data['access_token'];
+        final userData = data['user'];
+        
+        final userId = userData['uid'].toString();
+        final role = userData['role'];
+        final userName = userData['full_name'] ?? userData['name'] ?? 'User';
+        final userLocation = userData['location'] ?? '';
+        final userProfilePicture = userData['profile_picture'];
+        
+        // Set token in ApiService for future requests
+        if (token != null) {
+          _token = token;
+          ApiService.setToken(token);
+        }
+        
+        // Initialize user object
         _currentUser = User(
-          uid: userData.uid,
-          name: userData.name,
-          phoneNumber: userData.phoneNumber,
-          userType: 'consumer',
+          uid: userId,
+          name: userName,
+          phoneNumber: phoneNumber,
+          userType: role,
+          location: userLocation,
+          profilePicture: userProfilePicture,
         );
         
-        print('✅ Login successful for user: ${_currentUser!.name}');
+        print('✅ Login successful. Role: $role, Name: $userName');
         
-        await _saveUserSession(
-          uid: _currentUser!.uid,
-          name: _currentUser!.name,
-          phoneNumber: _currentUser!.phoneNumber,
-          role: 'consumer',
-        );
-
-        notifyListeners();
-        return true;
-      } else {
-        print('❌ Login failed: ${response.error}');
-        _setError(response.error ?? 'Login failed');
-        return false;
-      }
-    } catch (e) {
-      print('💥 Login exception: $e');
-      _setError('Login failed: $e');
-      return false;
-    } finally {
-      _setLoading(false);
-    }
-  }
-
-  Future<bool> loginSeller(String phoneNumber, String password) async {
-    _setLoading(true);
-    _clearError();
-
-    try {
-      print('🔐 Attempting seller login with phone: $phoneNumber');
-      
-      final loginData = {
-        'phone_number': phoneNumber,
-        'password': password,
-      };
-
-      print('📤 Sending seller login data: $loginData');
-      final response = await ApiService.loginSeller(loginData);
-      print('📥 Seller login response: success=${response.success}, error=${response.error}');
-      if (response.data != null) {
-        print('📊 Seller user data: ${response.data}');
-      }
-
-      if (response.success && response.data != null) {
-        // Backend returns: {uid, name, phone_number}
-        final userData = response.data!;
-        _currentUser = User(
-          uid: userData.uid,
-          name: userData.name,
-          phoneNumber: userData.phoneNumber, // User.fromJson already handles both field names
-          userType: 'farmer',
-        );
-        
-        print('✅ Login successful for seller: ${_currentUser!.name}');
-        
-        await _saveUserSession(
-          uid: _currentUser!.uid,
-          name: _currentUser!.name,
-          phoneNumber: _currentUser!.phoneNumber,
-          role: 'farmer',
-        );
+        // Save to secure storage
+        await _secureStorage.write(key: 'access_token', value: token ?? '');
+        await _secureStorage.write(key: 'user_id', value: userId);
+        await _secureStorage.write(key: 'user_role', value: role);
+        await _secureStorage.write(key: 'user_phone', value: phoneNumber);
+        await _secureStorage.write(key: 'user_name', value: userName);
+        await _secureStorage.write(key: 'user_location', value: userLocation);
+        if (userProfilePicture != null) {
+          await _secureStorage.write(key: 'user_profile_picture', value: userProfilePicture);
+        }
 
         notifyListeners();
         return true;
@@ -133,29 +101,38 @@ class AuthService extends ChangeNotifier {
     }
   }
 
-  Future<bool> registerBuyer(String name, String phoneNumber, String password, String location) async {
+  // Keep these for backward compatibility
+  Future<bool> loginBuyer(String phoneNumber, String password) => login(phoneNumber, password);
+  Future<bool> loginSeller(String phoneNumber, String password) => login(phoneNumber, password);
+
+  Future<bool> register(String name, String phoneNumber, String password, String location, {String role = 'buyer', String? profilePicture}) async {
     _setLoading(true);
     _clearError();
 
     try {
       final registerData = {
-        'full_name': name,
         'phone_number': phoneNumber,
         'password': password,
-        'confirm_password': password,
+        'full_name': name,
         'location': location,
+        'role': role,
       };
+      
+      if (profilePicture != null) {
+        registerData['profile_picture'] = profilePicture;
+      }
 
-      final response = await ApiService.registerBuyer(registerData);
+      final response = await ApiService.register(registerData);
 
       if (response.success && response.data != null) {
-        _currentUser = response.data!;
-        
-        await _saveUserSession(
-          uid: _currentUser!.uid,
-          name: _currentUser!.name,
-          phoneNumber: _currentUser!.phoneNumber,
-          role: 'consumer',
+        final data = response.data!;
+        _currentUser = User(
+          uid: data['uid'],
+          name: data['full_name'] ?? name,
+          phoneNumber: data['phone_number'] ?? phoneNumber,
+          userType: data['role'] ?? role,
+          location: data['location'] ?? location,
+          profilePicture: data['profile_picture'],
         );
 
         notifyListeners();
@@ -170,68 +147,15 @@ class AuthService extends ChangeNotifier {
     } finally {
       _setLoading(false);
     }
+  }
+
+  // Keep these for backward compatibility
+  Future<bool> registerBuyer(String name, String phoneNumber, String password, String location) async {
+    return await register(name, phoneNumber, password, location, role: 'buyer');
   }
 
   Future<bool> registerSeller(String name, String phoneNumber, String password, String location) async {
-    _setLoading(true);
-    _clearError();
-
-    try {
-      final registerData = {
-        'name': name,
-        'phone_number': phoneNumber,
-        'password': password,
-        'confirm_password': password,
-        'location': location,
-      };
-
-      print('🔐 Attempting seller registration with data: $registerData');
-      final response = await ApiService.registerSeller(registerData);
-      print('📥 Seller registration response: success=${response.success}, error=${response.error}');
-
-      if (response.success && response.data != null) {
-        _currentUser = response.data!;
-        
-        await _saveUserSession(
-          uid: _currentUser!.uid,
-          name: _currentUser!.name,
-          phoneNumber: _currentUser!.phoneNumber,
-          role: 'farmer',
-          location: _currentUser!.location,
-        );
-
-        notifyListeners();
-        return true;
-      } else {
-        _setError(response.error ?? 'Registration failed');
-        return false;
-      }
-    } catch (e) {
-      _setError('Registration failed: $e');
-      return false;
-    } finally {
-      _setLoading(false);
-    }
-  }
-
-  Future<void> _saveUserSession({
-    required String uid,
-    required String name,
-    required String phoneNumber,
-    required String role,
-    String? location,
-    String? profilePicture,
-  }) async {
-    await _secureStorage.write(key: 'user_uid', value: uid);
-    await _secureStorage.write(key: 'user_name', value: name);
-    await _secureStorage.write(key: 'user_phone', value: phoneNumber);
-    await _secureStorage.write(key: 'user_role', value: role);
-    if (location != null) {
-      await _secureStorage.write(key: 'user_location', value: location);
-    }
-    if (profilePicture != null) {
-      await _secureStorage.write(key: 'user_profile_picture', value: profilePicture);
-    }
+    return await register(name, phoneNumber, password, location, role: 'seller');
   }
 
   Future<void> updateCurrentUser({
@@ -252,39 +176,31 @@ class AuthService extends ChangeNotifier {
         userType: _currentUser!.userType,
       );
 
-      // Update secure storage
-      await _saveUserSession(
-        uid: _currentUser!.uid,
-        name: _currentUser!.name,
-        phoneNumber: _currentUser!.phoneNumber,
-        role: _currentUser!.userType,
-        location: _currentUser!.location,
-        profilePicture: _currentUser!.profilePicture,
-      );
-
       notifyListeners();
     }
   }
 
   Future<void> loadUserSession() async {
     try {
-      final uid = await _secureStorage.read(key: 'user_uid');
-      final name = await _secureStorage.read(key: 'user_name');
-      final phoneNumber = await _secureStorage.read(key: 'user_phone');
+      final token = await _secureStorage.read(key: 'access_token');
+      final userId = await _secureStorage.read(key: 'user_id');
       final role = await _secureStorage.read(key: 'user_role');
-      final location = await _secureStorage.read(key: 'user_location');
-      final profilePicture = await _secureStorage.read(key: 'user_profile_picture');
+      final phoneNumber = await _secureStorage.read(key: 'user_phone');
+      final userName = await _secureStorage.read(key: 'user_name');
+      final userLocation = await _secureStorage.read(key: 'user_location');
+      final userProfilePicture = await _secureStorage.read(key: 'user_profile_picture');
 
-      if (uid != null && name != null && phoneNumber != null && role != null) {
+      if (token != null && userId != null && role != null) {
+        _token = token;
+        ApiService.setToken(token);
+        
         _currentUser = User(
-          uid: uid,
-          name: name,
-          phoneNumber: phoneNumber,
-          location: location,
-          profilePicture: profilePicture,
-          createdAt: DateTime.now(),
-          updatedAt: DateTime.now(),
+          uid: userId,
+          name: userName ?? 'User',
+          phoneNumber: phoneNumber ?? '',
           userType: role,
+          location: userLocation,
+          profilePicture: userProfilePicture,
         );
         notifyListeners();
       }
@@ -297,6 +213,8 @@ class AuthService extends ChangeNotifier {
     try {
       await _secureStorage.deleteAll();
       _currentUser = null;
+      _token = null;
+      ApiService.clearToken();
       notifyListeners();
     } catch (e) {
       print('Error during logout: $e');
@@ -324,14 +242,8 @@ class AuthService extends ChangeNotifier {
 
     _currentUser = updated;
 
-    await _secureStorage.write(key: 'user_name', value: updated.name);
+    // Only update phone number in storage since we're using token-based auth
     await _secureStorage.write(key: 'user_phone', value: updated.phoneNumber);
-    if (updated.location != null) {
-      await _secureStorage.write(key: 'user_location', value: updated.location);
-    }
-    if (updated.profilePicture != null) {
-      await _secureStorage.write(key: 'user_profile_picture', value: updated.profilePicture);
-    }
 
     notifyListeners();
   }
@@ -345,17 +257,30 @@ class AuthService extends ChangeNotifier {
     if (_currentUser == null) return;
 
     try {
-      // Update local user data first for immediate UI update
-      await updateLocalUserProfile(
-        name: name,
-        phoneNumber: phoneNumber,
-        location: location,
-        profilePicture: profileImagePath,
-      );
-
-      // TODO: Add API call to update profile on backend
-      // For now, just update local storage
-      print('✅ Profile updated locally: name=$name, phone=$phoneNumber, location=$location');
+      // Call backend API to update profile
+      final profileData = {
+        'full_name': name,
+        'phone_number': phoneNumber,
+        'location': location,
+      };
+      
+      if (profileImagePath != null) {
+        profileData['profile_picture'] = profileImagePath;
+      }
+      
+      final response = await ApiService.updateProfile(profileData);
+      
+      if (response.success && response.data != null) {
+        // Update local user data with backend response
+        await updateLocalUserProfile(
+          name: response.data!['full_name'] ?? name,
+          phoneNumber: response.data!['phone_number'] ?? phoneNumber,
+          location: response.data!['location'] ?? location,
+          profilePicture: response.data!['profile_picture'],
+        );
+      } else {
+        throw Exception(response.error ?? 'Failed to update profile');
+      }
       
     } catch (e) {
       print('❌ Error updating profile: $e');

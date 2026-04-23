@@ -13,7 +13,6 @@ class _LoginScreenState extends State<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
-  bool _isFarmer = false;
   bool _isLoading = false;
 
   @override
@@ -30,13 +29,11 @@ class _LoginScreenState extends State<LoginScreen> {
 
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
-      bool success = false;
-
-      if (_isFarmer) {
-        success = await authService.loginSeller(_phoneController.text, _passwordController.text);
-      } else {
-        success = await authService.loginBuyer(_phoneController.text, _passwordController.text);
-      }
+      
+      final success = await authService.login(
+        _phoneController.text,
+        _passwordController.text,
+      );
 
       if (!mounted) return;
 
@@ -48,11 +45,16 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         );
         
-        // Navigate to appropriate dashboard
-        Navigator.pushReplacementNamed(
-          context, 
-          _isFarmer ? '/farmer_dashboard' : '/consumer_dashboard'
-        );
+        // Navigate to appropriate dashboard based on role from backend
+        final role = authService.getUserRole()?.toLowerCase();
+        
+        if (role == 'admin') {
+          Navigator.pushReplacementNamed(context, '/admin_dashboard');
+        } else if (role == 'seller' || role == 'farmer') {
+          Navigator.pushReplacementNamed(context, '/farmer_dashboard');
+        } else {
+          Navigator.pushReplacementNamed(context, '/consumer_dashboard');
+        }
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -81,13 +83,13 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       body: Container(
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
             colors: [
-              const Color(0xFF2E7D32),
-              const Color(0xFF4CAF50),
+              Color(0xFF2E7D32),
+              Color(0xFF4CAF50),
             ],
           ),
         ),
@@ -142,6 +144,10 @@ class _LoginScreenState extends State<LoginScreen> {
                   elevation: 8,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(16),
+                    side: const BorderSide(
+                      color: Color(0xFF2E7D32),
+                      width: 2,
+                    ),
                   ),
                   child: Padding(
                     padding: const EdgeInsets.all(24.0),
@@ -149,52 +155,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       key: _formKey,
                       child: Column(
                         children: [
-                          // User Type Toggle
-                          Row(
-                            children: [
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () => setState(() => _isFarmer = false),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    decoration: BoxDecoration(
-                                      color: !_isFarmer ? const Color(0xFF2E7D32) : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      'Buyer',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: !_isFarmer ? Colors.white : Colors.grey[600],
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 16),
-                              Expanded(
-                                child: GestureDetector(
-                                  onTap: () => setState(() => _isFarmer = true),
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(vertical: 12),
-                                    decoration: BoxDecoration(
-                                      color: _isFarmer ? const Color(0xFF2E7D32) : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(8),
-                                    ),
-                                    child: Text(
-                                      'Farmer',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: _isFarmer ? Colors.white : Colors.grey[600],
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
                           const SizedBox(height: 24),
                           // Phone Number Field
                           TextFormField(
@@ -203,9 +163,15 @@ class _LoginScreenState extends State<LoginScreen> {
                             decoration: InputDecoration(
                               labelText: 'Phone Number',
                               hintText: '09xxxxxxxx',
-                              prefixIcon: const Icon(Icons.phone),
-                              border: OutlineInputBorder(
+                              prefixIcon: const Icon(Icons.phone, color: Color(0xFF2E7D32)),
+                              labelStyle: const TextStyle(color: Color(0xFF2E7D32)),
+                              focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 2),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 1),
                               ),
                             ),
                             validator: (value) {
@@ -228,9 +194,15 @@ class _LoginScreenState extends State<LoginScreen> {
                             obscureText: true,
                             decoration: InputDecoration(
                               labelText: 'Password',
-                              prefixIcon: const Icon(Icons.lock),
-                              border: OutlineInputBorder(
+                              prefixIcon: const Icon(Icons.lock, color: Color(0xFF2E7D32)),
+                              labelStyle: const TextStyle(color: Color(0xFF2E7D32)),
+                              focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 2),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 1),
                               ),
                             ),
                             validator: (value) {
@@ -298,6 +270,7 @@ class _LoginScreenState extends State<LoginScreen> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 40),
               ],
             ),
           ),

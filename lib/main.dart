@@ -23,7 +23,12 @@ void main() async {
   // Initialize secure storage
   await _initializeSecureStorage();
   
-  runApp(const FarmFreshApp());
+  runApp(
+    ChangeNotifierProvider(
+      create: (context) => AuthService(),
+      child: const FarmFreshApp(),
+    ),
+  );
 }
 
 Future<void> _initializeSecureStorage() async {
@@ -37,46 +42,73 @@ Future<void> _initializeSecureStorage() async {
   }
 }
 
-class FarmFreshApp extends StatelessWidget {
+class FarmFreshApp extends StatefulWidget {
   const FarmFreshApp({super.key});
 
   @override
+  State<FarmFreshApp> createState() => _FarmFreshAppState();
+}
+
+class _FarmFreshAppState extends State<FarmFreshApp> {
+  bool _isSessionLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserSession();
+  }
+
+  Future<void> _loadUserSession() async {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    await authService.loadUserSession();
+    if (mounted) {
+      setState(() {
+        _isSessionLoading = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (context) => AuthService(),
-      child: Consumer<AuthService>(
-        builder: (context, authService, child) {
-          return MaterialApp(
-            title: 'FarmFresh',
-            debugShowCheckedModeBanner: false,
-            theme: ThemeData(
-              primarySwatch: Colors.green,
-              colorScheme: ColorScheme.fromSeed(
-                seedColor: const Color(0xFF2E7D32),
-                brightness: Brightness.light,
-              ),
-              useMaterial3: true,
+    return Consumer<AuthService>(
+      builder: (context, authService, child) {
+        return MaterialApp(
+          title: 'FarmFresh',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            primarySwatch: Colors.green,
+            colorScheme: ColorScheme.fromSeed(
+              seedColor: const Color(0xFF2E7D32),
+              brightness: Brightness.light,
             ),
-            home: _getInitialScreen(authService),
-            routes: {
-              '/login': (context) => const LoginScreen(),
-              '/register': (context) => const RegisterScreen(),
-              '/consumer_dashboard': (context) => const ConsumerDashboardScreen(),
-              '/farmer_dashboard': (context) => const FarmerDashboardScreen(),
-              '/admin_dashboard': (context) => const AdminDashboardScreen(),
-              '/consumer_profile': (context) => const ConsumerMyProfileScreen(),
-              '/farmer_profile': (context) => const FarmerMyProfileScreen(),
-              '/products': (context) => const ProductListScreen(),
-              '/orders': (context) => const ConsumerOrdersScreen(),
-              '/cart': (context) {
-                // Get buyer UID from route arguments or use default
-                final args = ModalRoute.of(context)?.settings.arguments;
-                final buyerUid = args is String ? args : '12345'; // Default for testing
-                return BuyerCartScreen(buyerUid: buyerUid);
-              },
+            useMaterial3: true,
+          ),
+          home: _isSessionLoading ? _buildLoadingScreen() : _getInitialScreen(authService),
+          routes: {
+            '/login': (context) => const LoginScreen(),
+            '/register': (context) => const RegisterScreen(),
+            '/consumer_dashboard': (context) => const ConsumerDashboardScreen(),
+            '/farmer_dashboard': (context) => const FarmerDashboardScreen(),
+            '/admin_dashboard': (context) => const AdminDashboardScreen(),
+            '/consumer_profile': (context) => const ConsumerMyProfileScreen(),
+            '/farmer_profile': (context) => const FarmerMyProfileScreen(),
+            '/products': (context) => const ProductListScreen(),
+            '/orders': (context) => const ConsumerOrdersScreen(),
+            '/cart': (context) {
+              return const BuyerCartScreen();
             },
-          );
-        },
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildLoadingScreen() {
+    return const Scaffold(
+      body: Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2E7D32)),
+        ),
       ),
     );
   }
@@ -88,10 +120,12 @@ class FarmFreshApp extends StatelessWidget {
       return const LoginScreen();
     }
     
-    switch (user!.userType) {
+    switch (user.userType) {
       case 'consumer':
+      case 'buyer':
         return const ConsumerDashboardScreen();
       case 'farmer':
+      case 'seller':
         return const FarmerDashboardScreen();
       case 'admin':
         return const AdminDashboardScreen();
