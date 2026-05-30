@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/auth_service.dart';
+import 'otp_verification_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -14,6 +15,7 @@ class _LoginScreenState extends State<LoginScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _isLoading = false;
+  String? _localError;
 
   @override
   void dispose() {
@@ -25,7 +27,10 @@ class _LoginScreenState extends State<LoginScreen> {
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _localError = null;
+    });
 
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
@@ -56,21 +61,30 @@ class _LoginScreenState extends State<LoginScreen> {
           Navigator.pushReplacementNamed(context, '/consumer_dashboard');
         }
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(authService.errorMessage ?? 'Login failed'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        if (authService.errorMessage != null && 
+            authService.errorMessage!.contains('verify OTP')) {
+          // Navigate to OTP screen if account not verified
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => OtpVerificationScreen(
+                phoneNumber: _phoneController.text.trim(),
+                password: _passwordController.text,
+              ),
+            ),
+          );
+          return;
+        }
+
+        setState(() {
+          _localError = authService.errorMessage;
+        });
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        setState(() {
+          _localError = 'Error: $e';
+        });
       }
     } finally {
       if (mounted) {
@@ -155,6 +169,48 @@ class _LoginScreenState extends State<LoginScreen> {
                       key: _formKey,
                       child: Column(
                         children: [
+                          if (_localError != null)
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              margin: const EdgeInsets.only(bottom: 20),
+                              decoration: BoxDecoration(
+                                color: _localError!.contains('banned') 
+                                    ? Colors.red[50] 
+                                    : Colors.orange[50],
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: _localError!.contains('banned') 
+                                      ? Colors.red 
+                                      : Colors.orange,
+                                  width: 1,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    _localError!.contains('banned') 
+                                        ? Icons.gavel 
+                                        : Icons.error_outline,
+                                    color: _localError!.contains('banned') 
+                                        ? Colors.red 
+                                        : Colors.orange[800],
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Text(
+                                      _localError!,
+                                      style: TextStyle(
+                                        color: _localError!.contains('banned') 
+                                            ? Colors.red[900] 
+                                            : Colors.orange[900],
+                                        fontWeight: FontWeight.w600,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           const SizedBox(height: 24),
                           // Phone Number Field
                           TextFormField(
@@ -174,6 +230,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 1),
                               ),
                             ),
+                            onFieldSubmitted: (_) => _login(),
                             validator: (value) {
                               if (value == null || value.isEmpty) {
                                 return 'Please enter your phone number';
@@ -205,6 +262,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 1),
                               ),
                             ),
+                            onFieldSubmitted: (_) => _login(),
                             validator: (value) {
                               if (value == null || value.isEmpty) {
                                 return 'Please enter your password';

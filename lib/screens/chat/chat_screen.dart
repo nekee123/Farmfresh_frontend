@@ -1,18 +1,24 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:async';
+import 'package:url_launcher/url_launcher.dart';
 import '../../services/auth_service.dart';
 import '../../services/api_service.dart';
+
+import 'package:flutter/services.dart';
 
 class ChatScreen extends StatefulWidget {
   final String? sellerId;
   final String? sellerName;
   final String? sellerProfilePicture;
+  final String? sellerPhoneNumber;
 
   const ChatScreen({
     super.key,
     this.sellerId,
     this.sellerName,
     this.sellerProfilePicture,
+    this.sellerPhoneNumber,
   });
 
   @override
@@ -25,51 +31,99 @@ class _ChatScreenState extends State<ChatScreen> {
   List<Map<String, dynamic>> _messages = [];
   bool _isLoading = true;
   bool _isSending = false;
+  Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _loadMessages();
+    _startPolling();
   }
 
   @override
   void dispose() {
+    _pollingTimer?.cancel();
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadMessages() async {
+  void _startPolling() {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      _loadMessages(isPolling: true);
+    });
+  }
+
+  Future<void> _loadMessages({bool isPolling = false}) async {
     if (widget.sellerId == null) {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
       return;
     }
 
     try {
       final response = await ApiService.getMessages(widget.sellerId!);
       if (response.success && response.data != null) {
+        if (!mounted) return;
+        
+        final newMessages = response.data!;
+        final hadNewMessages = newMessages.length > _messages.length;
+        
         setState(() {
-          _messages = response.data!;
+          _messages = newMessages;
           _isLoading = false;
         });
-        // Scroll to bottom after loading
-        Future.delayed(const Duration(milliseconds: 100), () {
-          if (_scrollController.hasClients) {
-            _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
-          }
-        });
+
+        // Mark messages as read if I am the receiver
+        _markMessagesAsRead(newMessages);
+
+        // Scroll to bottom if new messages arrived
+        if (hadNewMessages) {
+          Future.delayed(const Duration(milliseconds: 100), () {
+            if (_scrollController.hasClients) {
+              _scrollController.animateTo(
+                _scrollController.position.maxScrollExtent,
+                duration: const Duration(milliseconds: 300),
+                curve: Curves.easeOut,
+              );
+            }
+          });
+        }
       } else {
+        if (mounted && !isPolling) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading messages: $e');
+      if (mounted && !isPolling) {
         setState(() {
           _isLoading = false;
         });
       }
-    } catch (e) {
-      print('Error loading messages: $e');
-      setState(() {
-        _isLoading = false;
-      });
+    }
+  }
+
+  void _markMessagesAsRead(List<Map<String, dynamic>> messages) {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    final myUid = authService.currentUser?.uid;
+
+    for (var message in messages) {
+      // If I am the receiver and it's not read yet
+      final isReceiver = message['receiver_uid'] == myUid;
+      final isUnread = message['is_read'] == false;
+      final messageUid = message['uid'] ?? message['id'];
+
+      if (isReceiver && isUnread && messageUid != null) {
+        ApiService.markMessageAsRead(messageUid.toString());
+        // Optionally update local state to avoid re-calling before next poll
+        message['is_read'] = true;
+      }
     }
   }
 
@@ -181,14 +235,28 @@ class _ChatScreenState extends State<ChatScreen> {
         actions: [
           IconButton(
             icon: const Icon(Icons.phone),
-            onPressed: () {
-              // TODO: Implement call functionality
-            },
-          ),
-          IconButton(
-            icon: const Icon(Icons.video_call),
-            onPressed: () {
-              // TODO: Implement video call functionality
+            onPressed: () async {
+              if (widget.sellerPhoneNumber != null && widget.sellerPhoneNumber!.isNotEmpty) {
+                final Uri launchUri = Uri(
+                  scheme: 'tel',
+                  path: widget.sellerPhoneNumber,
+                );
+                if (await canLaunchUrl(launchUri)) {
+                  await launchUrl(launchUri);
+                } else {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Could not launch phone app')),
+                    );
+                  }
+                }
+              } else {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Phone number not available')),
+                  );
+                }
+              }
             },
           ),
         ],
@@ -327,24 +395,29 @@ class _ChatScreenState extends State<ChatScreen> {
                   borderRadius: BorderRadius.circular(24),
                   border: Border.all(color: Colors.grey[300]!),
                 ),
-                child: TextField(
-                  controller: _messageController,
-                  decoration: const InputDecoration(
-                    hintText: 'Type a message...',
-                    border: InputBorder.none,
-                    hintStyle: TextStyle(color: Colors.grey),
+                child: KeyboardListener(
+                  focusNode: FocusNode(),
+                  onKeyEvent: (event) {
+                    if (event is KeyDownEvent &&
+                        event.logicalKey == LogicalKeyboardKey.enter &&
+                        !HardwareKeyboard.instance.isShiftPressed) {
+                      _sendMessage();
+                    }
+                  },
+                  child: TextField(
+                    controller: _messageController,
+                    decoration: const InputDecoration(
+                      hintText: 'Type a message...',
+                      border: InputBorder.none,
+                      hintStyle: TextStyle(color: Colors.grey),
+                    ),
+                    maxLines: null,
+                    textCapitalization: TextCapitalization.sentences,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) => _sendMessage(),
                   ),
-                  maxLines: null,
-                  textCapitalization: TextCapitalization.sentences,
                 ),
               ),
-            ),
-            const SizedBox(width: 8),
-            IconButton(
-              icon: Icon(Icons.camera_alt, color: Colors.grey[600]),
-              onPressed: () {
-                // TODO: Implement camera functionality
-              },
             ),
             const SizedBox(width: 4),
             Container(
@@ -372,10 +445,18 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
-  String _formatTime(String? dateTimeStr) {
-    if (dateTimeStr == null) return '';
+  String _formatTime(dynamic timeData) {
+    if (timeData == null) return '';
     try {
-      final dateTime = DateTime.parse(dateTimeStr);
+      DateTime dateTime;
+      if (timeData is num) {
+        dateTime = DateTime.fromMillisecondsSinceEpoch((timeData * 1000).toInt());
+      } else if (timeData is String) {
+        dateTime = DateTime.parse(timeData);
+      } else {
+        return '';
+      }
+
       final now = DateTime.now();
       final difference = now.difference(dateTime);
 

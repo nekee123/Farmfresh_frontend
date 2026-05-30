@@ -13,6 +13,34 @@ class AdminUserDetailScreen extends StatefulWidget {
 
 class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
   bool _isProcessing = false;
+  bool _isBanned = false;
+  bool _isLoadingStatus = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _isBanned = widget.user['is_banned'] == true;
+    _fetchBanStatus();
+  }
+
+  Future<void> _fetchBanStatus() async {
+    final userId = widget.user['uid']?.toString() ?? '';
+    if (userId.isEmpty) return;
+
+    final response = await ApiService.getUserBanStatus(userId);
+    if (response.success && response.data != null) {
+      if (mounted) {
+        setState(() {
+          _isBanned = response.data!['is_banned'] == true;
+          _isLoadingStatus = false;
+        });
+      }
+    } else {
+      if (mounted) {
+        setState(() => _isLoadingStatus = false);
+      }
+    }
+  }
 
   String _getRoleDisplay(String? role) {
     switch (role?.toLowerCase()) {
@@ -42,7 +70,7 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
 
   String? _getUserStatus() {
     // Check for status field if it exists
-    if (widget.user['is_banned'] == true) return 'Banned';
+    if (_isBanned) return 'Banned';
     if (widget.user['is_blocked'] == true) return 'Blocked';
     if (widget.user['is_approved'] == false) return 'Pending';
     return 'Active';
@@ -99,8 +127,12 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
         actionName = 'unblock';
         break;
       case 'ban':
-        response = await ApiService.banUser(userId);
+        response = await ApiService.updateUserBanStatus(userId, true);
         actionName = 'ban';
+        break;
+      case 'unban':
+        response = await ApiService.updateUserBanStatus(userId, false);
+        actionName = 'unban';
         break;
       case 'delete':
         response = await ApiService.deleteUser(userId);
@@ -217,7 +249,7 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
                     _buildInfoRow('Phone Number', widget.user['phone_number'] ?? 'N/A'),
                     _buildInfoRow('Location', widget.user['location'] ?? 'N/A'),
                     if (widget.user['created_at'] != null)
-                      _buildInfoRow('Created At', widget.user['created_at']),
+                      _buildInfoRow('Created At', _formatDate(widget.user['created_at'])),
                   ],
                 ),
               ),
@@ -233,22 +265,7 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            _buildActionButton(
-              'Approve User',
-              Icons.check_circle,
-              Colors.green,
-              () => _performAction('approve', userId),
-              status == 'Pending',
-            ),
-            const SizedBox(height: 12),
-            _buildActionButton(
-              'Block User',
-              Icons.block,
-              Colors.orange,
-              () => _performAction('block', userId),
-              status != 'Blocked' && status != 'Banned',
-            ),
-            const SizedBox(height: 12),
+
             _buildActionButton(
               'Unblock User',
               Icons.lock_open,
@@ -258,11 +275,31 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
             ),
             const SizedBox(height: 12),
             _buildActionButton(
-              'Ban User',
-              Icons.dangerous,
-              Colors.red,
-              () => _performAction('ban', userId),
-              status != 'Banned',
+              _isBanned ? 'Unban User' : 'Ban User',
+              _isBanned ? Icons.gavel : Icons.dangerous,
+              _isBanned ? Colors.blue : Colors.red,
+              () async {
+                if (!_isBanned) {
+                  final confirmed = await showDialog<bool>(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Ban User'),
+                      content: Text('Are you sure you want to ban ${widget.user['full_name'] ?? widget.user['name'] ?? 'this user'}? They will not be able to log in.'),
+                      actions: [
+                        TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+                        TextButton(
+                          onPressed: () => Navigator.pop(context, true),
+                          style: TextButton.styleFrom(foregroundColor: Colors.red),
+                          child: const Text('Ban'),
+                        ),
+                      ],
+                    ),
+                  );
+                  if (confirmed != true) return;
+                }
+                await _performAction(_isBanned ? 'unban' : 'ban', userId);
+              },
+              !_isLoadingStatus,
             ),
             const SizedBox(height: 12),
             _buildActionButton(
@@ -306,7 +343,7 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value) {
+  Widget _buildInfoRow(String label, dynamic value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Row(
@@ -324,13 +361,27 @@ class _AdminUserDetailScreenState extends State<AdminUserDetailScreen> {
           ),
           Expanded(
             child: Text(
-              value,
+              value?.toString() ?? 'N/A',
               style: TextStyle(color: Colors.grey[900]),
             ),
           ),
         ],
       ),
     );
+  }
+
+  String _formatDate(dynamic dateValue) {
+    try {
+      DateTime date;
+      if (dateValue is num) {
+        date = DateTime.fromMillisecondsSinceEpoch((dateValue * 1000).toInt());
+      } else {
+        date = DateTime.parse(dateValue.toString());
+      }
+      return '${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute}';
+    } catch (e) {
+      return dateValue?.toString() ?? 'N/A';
+    }
   }
 
   Widget _buildActionButton(

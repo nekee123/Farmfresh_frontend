@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/auth_service.dart';
@@ -5,6 +6,7 @@ import '../../services/cart_service.dart';
 import '../../services/api_service.dart';
 import '../../models/cart_item.dart';
 import '../../models/cart_summary.dart';
+import '../../models/api_response.dart';
 import '../orders/consumer_orders_screen.dart';
 
 class CheckoutScreen extends StatefulWidget {
@@ -18,17 +20,86 @@ class CheckoutScreen extends StatefulWidget {
 
 class _CheckoutScreenState extends State<CheckoutScreen> {
   final CartService _cartService = CartService();
+  final TextEditingController _addressController = TextEditingController();
   List<CartItem> _cartItems = [];
   CartSummary? _cartSummary;
+  List<Map<String, dynamic>> _activeDeals = [];
   bool _isLoading = true;
   bool _isProcessing = false;
   String? _selectedPaymentMethod;
   List<String> _availablePaymentMethods = [];
 
+  final List<String> _barangayList = [
+    'Brgy. Balimbing Proper, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Batu-batu (Pob.), Panglima Sugala, Tawi-Tawi',
+    'Brgy. Buan, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Dungon, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Luuk Buntal, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Parangan, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Tabunan, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Tungbangkaw, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Bauno Garing, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Belatan Halu, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Karaha, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Kulape, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Liyaburan, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Magsaggaw, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Malacca, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Sumangday, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Tundon, Panglima Sugala, Tawi-Tawi',
+    'Brgy. Ipil, Bongao, Tawi-Tawi',
+    'Brgy. Kamagong, Bongao, Tawi-Tawi',
+    'Brgy. Karungdong, Bongao, Tawi-Tawi',
+    'Brgy. Lakit Lakit, Bongao, Tawi-Tawi',
+    'Brgy. Lamion, Bongao, Tawi-Tawi',
+    'Brgy. Lapid Lapid, Bongao, Tawi-Tawi',
+    'Brgy. Lato Lato, Bongao, Tawi-Tawi',
+    'Brgy. Luuk Pandan, Bongao, Tawi-Tawi',
+    'Brgy. Luuk Tulay, Bongao, Tawi-Tawi',
+    'Brgy. Malassa, Bongao, Tawi-Tawi',
+    'Brgy. Mandulan, Bongao, Tawi-Tawi',
+    'Brgy. Masantong, Bongao, Tawi-Tawi',
+    'Brgy. Montay Montay, Bongao, Tawi-Tawi',
+    'Brgy. Pababag, Bongao, Tawi-Tawi',
+    'Brgy. Pagasinan, Bongao, Tawi-Tawi',
+    'Brgy. Pahut, Bongao, Tawi-Tawi',
+    'Brgy. Pakias, Bongao, Tawi-Tawi',
+    'Brgy. Paniongan, Bongao, Tawi-Tawi',
+    'Brgy. Pasiagan, Bongao, Tawi-Tawi',
+    'Brgy. Bongao Poblacion, Bongao, Tawi-Tawi',
+    'Brgy. Sanga-sanga, Bongao, Tawi-Tawi',
+    'Brgy. Silubog, Bongao, Tawi-Tawi',
+    'Brgy. Simandagit, Bongao, Tawi-Tawi',
+    'Brgy. Sumangat, Bongao, Tawi-Tawi',
+    'Brgy. Tarawakan, Bongao, Tawi-Tawi',
+    'Brgy. Tongsinah, Bongao, Tawi-Tawi',
+    'Brgy. Tubig Basag, Bongao, Tawi-Tawi',
+    'Brgy. Ungus-ungus, Bongao, Tawi-Tawi',
+    'Brgy. Lagasan, Bongao, Tawi-Tawi',
+    'Brgy. Nalil, Bongao, Tawi-Tawi',
+    'Brgy. Pagatpat, Bongao, Tawi-Tawi',
+    'Brgy. Pag-asa, Bongao, Tawi-Tawi',
+    'Brgy. Tubig Tanah, Bongao, Tawi-Tawi',
+    'Brgy. Tubig-Boh, Bongao, Tawi-Tawi',
+    'Brgy. Tubig-Mampallam, Bongao, Tawi-Tawi',
+  ];
+
   @override
   void initState() {
     super.initState();
     _loadCart();
+    _initializeAddress();
+  }
+
+  @override
+  void dispose() {
+    _addressController.dispose();
+    super.dispose();
+  }
+
+  void _initializeAddress() {
+    final authService = Provider.of<AuthService>(context, listen: false);
+    _addressController.text = authService.currentUser?.location ?? '';
   }
 
   Future<void> _loadCart() async {
@@ -38,12 +109,23 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       final authService = Provider.of<AuthService>(context, listen: false);
       _cartService.setAuthToken(authService.token ?? '');
       
-      final cartItems = await _cartService.getCartItems();
-      final cartSummary = await _cartService.getCartSummary();
+      // Fetch cart items, summary, and active deals in parallel
+      final results = await Future.wait([
+        _cartService.getCartItems(),
+        _cartService.getCartSummary(),
+        ApiService.getActiveDeals(),
+      ]);
+      
+      final cartItems = results[0] as List<CartItem>;
+      final cartSummary = results[1] as CartSummary;
+      final dealsResponse = results[2] as ApiResponse<List<Map<String, dynamic>>>;
       
       setState(() {
         _cartItems = cartItems;
         _cartSummary = cartSummary;
+        if (dealsResponse.success) {
+          _activeDeals = dealsResponse.data ?? [];
+        }
         _isLoading = false;
       });
       
@@ -53,6 +135,37 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Error loading cart: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _updateQuantity(CartItem item, int newQuantity) async {
+    if (newQuantity <= 0) {
+      await _removeItem(item);
+      return;
+    }
+
+    try {
+      await _cartService.updateCartItem(item.uid, newQuantity);
+      await _loadCart(); // Refresh cart and totals
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error updating item: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _removeItem(CartItem item) async {
+    try {
+      await _cartService.removeFromCart(item.uid);
+      await _loadCart(); // Refresh cart and totals
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error removing item: $e')),
         );
       }
     }
@@ -90,6 +203,16 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Future<void> _placeOrder() async {
+    if (_addressController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a delivery address'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
     setState(() => _isProcessing = true);
     
     try {
@@ -99,31 +222,49 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       for (final item in _cartItems) {
         final product = item.product;
         if (product == null) continue;
+
+        // Apply discount logic if applicable
+        double finalItemPrice = item.priceAtTime;
+        bool hasDiscount = false;
+        String? dealId;
         
-        print('🛒 Product data keys: ${product.keys.toList()}');
-        print('🛒 Full product data: $product');
+        final matchingDeal = _activeDeals.firstWhere(
+          (deal) => deal['type'] == product['type'],
+          orElse: () => {},
+        );
+
+        if (matchingDeal.isNotEmpty) {
+          final percentage = (matchingDeal['percentage'] as num?)?.toDouble() ?? 0.0;
+          if (percentage > 0) {
+            finalItemPrice = item.priceAtTime * (1 - percentage / 100);
+            hasDiscount = true;
+            dealId = matchingDeal['deal_id'];
+          }
+        }
         
         final orderData = {
+          'farm_product_uid': item.productUid,
+          'quantity': item.quantity,
+          'payment_method': _selectedPaymentMethod ?? 'Cash on Delivery',
+          'buyer_address': _addressController.text.trim(),
           'buyer_name': authService.currentUser?.name ?? 'Unknown',
           'buyer_contact': authService.currentUser?.phoneNumber ?? '',
-          'farm_product_uid': item.productUid,
-          'farm_product_name': product['name'] ?? 'Unknown',
+          'total_price': item.quantity * finalItemPrice,
           'seller_uid': product['seller_uid'] ?? product['seller_id'] ?? product['uid'] ?? '',
-          'seller_name': product['seller_name'] ?? product['seller'] ?? 'Unknown',
-          'seller_contact': '',
-          'quantity': item.quantity,
-          'total_price': item.quantity * item.priceAtTime,
-          'payment_method': _selectedPaymentMethod ?? 'Cash on Delivery',
+          if (hasDiscount) 'deal_id': dealId,
         };
         
-        print('🛒 Creating order with payment method: "$_selectedPaymentMethod"');
-        print('🛒 Product payment methods: ${product['payment_methods']}');
-        print('🛒 Available methods: $_availablePaymentMethods');
-        print('🛒 Order data: $orderData');
+        print('-----------------------------------------');
+        print('🛒 PLACING ORDER FOR: ${product['name']}');
+        print('💰 ORIGINAL PRICE: ₱${item.priceAtTime}');
+        print('🏷️ DISCOUNTED PRICE: ₱${finalItemPrice}');
+        print('🔢 QUANTITY: ${item.quantity}');
+        print('💵 TOTAL SENT TO BACKEND: ₱${item.quantity * finalItemPrice}');
+        print('🆔 DEAL ID: ${hasDiscount ? dealId : "None"}');
+        print('📦 FULL DATA: $orderData');
+        print('-----------------------------------------');
         
         final response = await ApiService.createOrder(orderData);
-        
-        print('🛒 Order response - success: ${response.success}, error: ${response.error}, data: ${response.data}');
         
         if (!response.success) {
           if (mounted) {
@@ -169,6 +310,35 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         setState(() => _isProcessing = false);
       }
     }
+  }
+
+  Widget _buildProductImage(String? imageData, {double? width, double? height}) {
+    if (imageData == null || imageData.isEmpty) {
+      return Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40);
+    }
+
+    if (imageData.startsWith('data:image')) {
+      try {
+        final base64String = imageData.split(',').last;
+        return Image.memory(
+          base64Decode(base64String),
+          width: width,
+          height: height,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40),
+        );
+      } catch (e) {
+        return Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40);
+      }
+    }
+
+    return Image.network(
+      imageData,
+      width: width,
+      height: height,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40),
+    );
   }
 
   @override
@@ -270,6 +440,24 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   Widget _buildOrderItem(CartItem item) {
     final productName = item.product?['name'] ?? 'Unknown Product';
     final productImage = item.product?['image'];
+    final productType = item.product?['type'];
+    
+    double discountedPrice = item.priceAtTime;
+    bool hasDiscount = false;
+    double percentage = 0;
+
+    final matchingDeal = _activeDeals.firstWhere(
+      (deal) => deal['type'] == productType,
+      orElse: () => {},
+    );
+
+    if (matchingDeal.isNotEmpty) {
+      percentage = (matchingDeal['percentage'] as num?)?.toDouble() ?? 0.0;
+      if (percentage > 0) {
+        discountedPrice = item.priceAtTime * (1 - percentage / 100);
+        hasDiscount = true;
+      }
+    }
     
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -291,15 +479,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             child: productImage != null && productImage.isNotEmpty
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      productImage,
-                      width: 60,
-                      height: 60,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const Icon(Icons.image, color: Colors.grey);
-                      },
-                    ),
+                    child: _buildProductImage(productImage, width: 60, height: 60),
                   )
                 : const Icon(Icons.image, color: Colors.grey),
           ),
@@ -318,24 +498,100 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
+                if (hasDiscount)
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.red[50],
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '${percentage.toInt()}% OFF',
+                          style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.red,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '₱${item.priceAtTime.toStringAsFixed(2)}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.grey[500],
+                          decoration: TextDecoration.lineThrough,
+                        ),
+                      ),
+                    ],
+                  ),
                 Text(
-                  'Qty: ${item.quantity} x ₱${item.priceAtTime.toStringAsFixed(2)}',
+                  'Qty: ${item.quantity} x ₱${discountedPrice.toStringAsFixed(2)}',
                   style: TextStyle(
                     fontSize: 12,
                     color: Colors.grey[600],
                   ),
                 ),
+                const SizedBox(height: 8),
+                // Quantity Controls
+                Row(
+                  children: [
+                    _buildQtyButton(
+                      Icons.remove,
+                      () => _updateQuantity(item, item.quantity - 1),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        '${item.quantity}',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                    _buildQtyButton(
+                      Icons.add,
+                      () => _updateQuantity(item, item.quantity + 1),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                      onPressed: () => _removeItem(item),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    ),
+                  ],
+                ),
               ],
             ),
           ),
+          const SizedBox(width: 8),
           Text(
-            '₱${(item.quantity * item.priceAtTime).toStringAsFixed(2)}',
+            '₱${(item.quantity * discountedPrice).toStringAsFixed(2)}',
             style: const TextStyle(
               fontWeight: FontWeight.bold,
               color: Color(0xFF2E7D32),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildQtyButton(IconData icon, VoidCallback onPressed) {
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: InkWell(
+        onTap: onPressed,
+        child: Icon(icon, size: 16, color: const Color(0xFF2E7D32)),
       ),
     );
   }
@@ -437,29 +693,67 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Home Address',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 16,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Delivery Address',
+                style: TextStyle(
+                  fontWeight: FontWeight.w600,
+                  fontSize: 16,
+                ),
+              ),
+              TextButton(
+                onPressed: _showAddressDialog,
+                child: const Text('Select'),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(
-            '123 Main Street, City, Province',
+            _addressController.text.isEmpty 
+                ? 'No address provided' 
+                : _addressController.text,
             style: TextStyle(
-              color: Colors.grey[600],
+              color: _addressController.text.isEmpty ? Colors.red : Colors.grey[600],
               fontSize: 14,
             ),
           ),
-          const SizedBox(height: 8),
-          TextButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Address editing coming soon!')),
+        ],
+      ),
+    );
+  }
+
+  void _showAddressDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Select Delivery Barangay'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: _barangayList.length,
+            itemBuilder: (context, index) {
+              final barangay = _barangayList[index];
+              return ListTile(
+                title: Text(barangay, style: const TextStyle(fontSize: 14)),
+                onTap: () {
+                  setState(() {
+                    _addressController.text = barangay;
+                  });
+                  Navigator.pop(context);
+                },
+                selected: _addressController.text == barangay,
+                selectedTileColor: const Color(0xFF2E7D32).withOpacity(0.1),
               );
             },
-            child: const Text('Edit Address'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
           ),
         ],
       ),
@@ -467,6 +761,27 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   }
 
   Widget _buildOrderSummary() {
+    double subtotal = _cartSummary?.totalAmount ?? 0;
+    double totalDiscount = 0;
+
+    for (final item in _cartItems) {
+      final matchingDeal = _activeDeals.firstWhere(
+        (deal) => deal['type'] == item.product?['type'],
+        orElse: () => {},
+      );
+
+      if (matchingDeal.isNotEmpty) {
+        final percentage = (matchingDeal['percentage'] as num?)?.toDouble() ?? 0.0;
+        if (percentage > 0) {
+          double originalItemTotal = item.quantity * item.priceAtTime;
+          double discountedItemTotal = originalItemTotal * (1 - percentage / 100);
+          totalDiscount += (originalItemTotal - discountedItemTotal);
+        }
+      }
+    }
+
+    double finalTotal = subtotal - totalDiscount;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -476,12 +791,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       ),
       child: Column(
         children: [
-          _buildSummaryRow('Subtotal', _cartSummary?.totalAmount ?? 0),
+          _buildSummaryRow('Subtotal', subtotal),
+          if (totalDiscount > 0)
+            _buildSummaryRow(
+              'Deal Discount', 
+              -totalDiscount, 
+              valueColor: Colors.red
+            ),
           _buildSummaryRow('Delivery Fee', 0.0),
           const Divider(),
           _buildSummaryRow(
             'Total',
-            _cartSummary?.totalAmount ?? 0,
+            finalTotal,
             isBold: true,
           ),
         ],
@@ -489,7 +810,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     );
   }
 
-  Widget _buildSummaryRow(String label, double value, {bool isBold = false}) {
+  Widget _buildSummaryRow(String label, double value, {bool isBold = false, Color? valueColor}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
@@ -503,11 +824,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
             ),
           ),
           Text(
-            '₱${value.toStringAsFixed(2)}',
+            '${value < 0 ? '-' : ''}₱${value.abs().toStringAsFixed(2)}',
             style: TextStyle(
               fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
               fontSize: isBold ? 16 : 14,
-              color: isBold ? const Color(0xFF2E7D32) : Colors.grey[700],
+              color: valueColor ?? (isBold ? const Color(0xFF2E7D32) : Colors.grey[700]),
             ),
           ),
         ],

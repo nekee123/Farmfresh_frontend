@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:async';
 import '../../services/auth_service.dart';
 import '../../services/api_service.dart';
 import 'chat_screen.dart';
@@ -14,33 +15,58 @@ class ChatListScreen extends StatefulWidget {
 class _ChatListScreenState extends State<ChatListScreen> {
   List<Map<String, dynamic>> _conversations = [];
   bool _isLoading = true;
+  Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _loadConversations();
+    _startPolling();
   }
 
-  Future<void> _loadConversations() async {
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startPolling() {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      _loadConversations(isPolling: true);
+    });
+  }
+
+  void _stopPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
+  }
+
+  Future<void> _loadConversations({bool isPolling = false}) async {
     try {
       final response = await ApiService.getConversations();
       if (response.success && response.data != null) {
-        setState(() {
-          _conversations = response.data!;
-          _isLoading = false;
-        });
+        if (mounted) {
+          setState(() {
+            _conversations = response.data!;
+            _isLoading = false;
+          });
+        }
       } else {
+        if (mounted && !isPolling) {
+          setState(() {
+            _conversations = [];
+            _isLoading = false;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading conversations: $e');
+      if (mounted && !isPolling) {
         setState(() {
           _conversations = [];
           _isLoading = false;
         });
       }
-    } catch (e) {
-      print('Error loading conversations: $e');
-      setState(() {
-        _conversations = [];
-        _isLoading = false;
-      });
     }
   }
 
@@ -151,17 +177,20 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final isOnline = conversation['is_online'] ?? false;
 
     return InkWell(
-      onTap: () {
-        Navigator.push(
+      onTap: () async {
+        _stopPolling();
+        await Navigator.push(
           context,
           MaterialPageRoute(
             builder: (context) => ChatScreen(
-              sellerId: conversation['uid'],
-              sellerName: conversation['name'],
+              sellerId: conversation['user_uid'],
+              sellerName: conversation['user_name'],
               sellerProfilePicture: conversation['profile_picture'],
+              sellerPhoneNumber: conversation['phone_number'],
             ),
           ),
         );
+        _startPolling();
       },
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -184,10 +213,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 CircleAvatar(
                   radius: 28,
                   backgroundColor: Colors.grey[200],
-                  backgroundImage: conversation['profile_picture'] != null
+                  backgroundImage: conversation['profile_picture'] != null && conversation['profile_picture'] != ''
                       ? NetworkImage(conversation['profile_picture'])
                       : null,
-                  child: conversation['profile_picture'] == null
+                  child: conversation['profile_picture'] == null || conversation['profile_picture'] == ''
                       ? Icon(Icons.person, color: Colors.grey[600])
                       : null,
                 ),
@@ -215,7 +244,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   Row(
                     children: [
                       Text(
-                        conversation['name'] ?? 'Unknown',
+                        conversation['user_name'] ?? 'Unknown',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w600,
@@ -277,10 +306,21 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
-  String _formatTime(String? dateTimeStr) {
-    if (dateTimeStr == null) return '';
+  String _formatTime(dynamic timeData) {
+    if (timeData == null) return '';
+    
+    DateTime dateTime;
     try {
-      final dateTime = DateTime.parse(dateTimeStr);
+      if (timeData is num) {
+        // Handle Unix timestamp (double or int)
+        dateTime = DateTime.fromMillisecondsSinceEpoch((timeData * 1000).toInt());
+      } else if (timeData is String) {
+        // Handle ISO 8601 string
+        dateTime = DateTime.parse(timeData);
+      } else {
+        return '';
+      }
+
       final now = DateTime.now();
       final difference = now.difference(dateTime);
 

@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:async';
+import 'dart:convert';
 import '../../services/auth_service.dart';
 import '../../services/api_service.dart';
+import '../../models/api_response.dart';
 import '../products/product_list_screen.dart';
 import '../products/product_detail_screen.dart';
 import '../buyer/buyer_cart_screen.dart';
 import '../profile/consumer_my_profile_screen.dart';
 import '../profile/seller_profile_screen.dart';
 import '../orders/consumer_orders_screen.dart';
+import '../buyer/deal_list_screen.dart';
 import '../notifications/notifications_screen.dart';
 import '../chat/chat_list_screen.dart';
 import '../../widgets/hamburger_menu.dart';
@@ -29,21 +33,167 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
   String? _productsError;
   bool _showNotificationCard = false;
   int _unreadCount = 0;
+  int _unreadMessageCount = 0;
+  int _orderCount = 0;
+  Map<String, dynamic>? _activeDeal;
   final TextEditingController _searchController = TextEditingController();
+  Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     _loadProducts();
     _loadNotifications();
+    _loadUnreadMessageCount();
+    _loadOrderCount();
+    _loadActiveDeal();
+    _startPolling();
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  void _startPolling() {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      _loadDashboardData();
+    });
+  }
+
+  Future<void> _loadDashboardData() async {
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final buyerId = authService.currentUser?.uid;
+      
+      final results = await Future.wait([
+        ApiService.getNotifications(),
+        ApiService.getConversations(),
+        buyerId != null ? ApiService.getBuyerOrders(buyerId) : Future.value(null),
+        ApiService.getActiveDeals(),
+      ]);
+
+      if (!mounted) return;
+
+      setState(() {
+        // 1. Update Notifications
+        final notifResponse = results[0] as ApiResponse<List<Map<String, dynamic>>>;
+        if (notifResponse.success && notifResponse.data != null) {
+          _notifications = notifResponse.data!.where((n) => 
+            n['sender_name'] != null && n['product_name'] != null).toList();
+          _unreadCount = _notifications.where((n) => (n['is_read'] ?? false) == false).length;
+        }
+
+        // 2. Update Messages
+        final msgResponse = results[1] as ApiResponse<List<Map<String, dynamic>>>;
+        if (msgResponse.success && msgResponse.data != null) {
+          int total = 0;
+          for (var conv in msgResponse.data!) {
+            total += (conv['unread_count'] as num? ?? 0).toInt();
+          }
+          _unreadMessageCount = total;
+        }
+
+        // 3. Update Orders
+        if (results[2] != null) {
+          final orderResponse = results[2] as ApiResponse<List<Map<String, dynamic>>>;
+          if (orderResponse.success && orderResponse.data != null) {
+            _orderCount = orderResponse.data!.length;
+          }
+        }
+
+        // 4. Update Deals
+        final dealResponse = results[3] as ApiResponse<List<Map<String, dynamic>>>;
+        if (dealResponse.success && dealResponse.data != null && dealResponse.data!.isNotEmpty) {
+          _activeDeal = dealResponse.data!.first;
+        } else {
+          _activeDeal = null;
+        }
+      });
+    } catch (e) {
+      print('Error polling dashboard data: $e');
+    }
+  }
+
+  void _stopPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
+  }
+
+  Future<void> _loadOrderCount() async {
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final buyerId = authService.currentUser?.uid;
+      if (buyerId != null) {
+        final response = await ApiService.getBuyerOrders(buyerId);
+        if (response.success && response.data != null) {
+          if (mounted) {
+            setState(() {
+              _orderCount = response.data!.length;
+            });
+          }
+        }
+      }
+    } catch (e) {
+      print('Error loading order count: $e');
+    }
+  }
+
+  Future<void> _loadActiveDeal() async {
+    try {
+      final response = await ApiService.getActiveDeals();
+      if (response.success && response.data != null && response.data!.isNotEmpty) {
+        if (mounted) {
+          setState(() {
+            _activeDeal = response.data!.first;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _activeDeal = null;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading active deal: $e');
+    }
+  }
+
+  Future<void> _loadUnreadMessageCount() async {
+    try {
+      final response = await ApiService.getConversations();
+      if (response.success && response.data != null) {
+        int total = 0;
+        for (var conv in response.data!) {
+          total += (conv['unread_count'] as num? ?? 0).toInt();
+        }
+        if (mounted) {
+          setState(() {
+            _unreadMessageCount = total;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading unread message count: $e');
+    }
   }
 
   Future<void> _loadNotifications() async {
     try {
       final response = await ApiService.getNotifications();
       if (response.success && response.data != null) {
+        final List<Map<String, dynamic>> allNotifications = response.data!;
+        
+        // Filter out notifications with null sender_name or product_name
+        final validNotifications = allNotifications.where((n) {
+          return n['sender_name'] != null && n['product_name'] != null;
+        }).toList();
+
         setState(() {
-          _notifications = response.data!;
+          _notifications = validNotifications;
           _unreadCount = _notifications.where((n) => (n['is_read'] ?? false) == false).length;
         });
       }
@@ -64,8 +214,15 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
     try {
       final response = await ApiService.getNotifications();
       if (response.success && response.data != null) {
+        final List<Map<String, dynamic>> allNotifications = response.data!;
+        
+        // Filter out notifications with null sender_name or product_name
+        final validNotifications = allNotifications.where((n) {
+          return n['sender_name'] != null && n['product_name'] != null;
+        }).toList();
+
         setState(() {
-          _notifications = response.data!;
+          _notifications = validNotifications;
           _unreadCount = _notifications.where((n) => (n['is_read'] ?? false) == false).length;
           _showNotificationCard = true;
         });
@@ -80,7 +237,12 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
     try {
       final response = await ApiService.getNotifications();
       if (response.success && response.data != null) {
-        _notifications = response.data!;
+        final List<Map<String, dynamic>> allNotifications = response.data!;
+        
+        // Filter out notifications with null sender_name or product_name
+        _notifications = allNotifications.where((n) {
+          return n['sender_name'] != null && n['product_name'] != null;
+        }).toList();
       }
     } catch (e) {
       print('Error loading notifications: $e');
@@ -212,6 +374,12 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
         message = 'The seller $senderName has marked your order for $productName as delivered';
         icon = Icons.local_shipping;
         iconColor = Colors.green;
+        break;
+      case 'new_review':
+        title = 'New Review';
+        message = '$senderName left a review for $productName';
+        icon = Icons.star;
+        iconColor = Colors.amber;
         break;
       default:
         title = 'Notification';
@@ -464,12 +632,7 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
             child: result['image'] != null
                 ? ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      result['image'],
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) => 
-                          Icon(Icons.image, color: Colors.grey),
-                    ),
+                    child: _buildProductImage(result['image']),
                   )
                 : Icon(Icons.image, color: Colors.grey),
           ),
@@ -556,6 +719,32 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
         _isSearching = false;
       });
     }
+  }
+
+  Widget _buildProductImage(String? imageData, {double? width, double? height}) {
+    if (imageData == null || imageData.isEmpty) {
+      return Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40);
+    }
+
+    if (imageData.startsWith('data:image')) {
+      return Image.memory(
+        base64Decode(imageData.split(',').last),
+        width: width,
+        height: height,
+        fit: BoxFit.cover,
+        gaplessPlayback: true, // This prevents the flicker during rebuilds
+        errorBuilder: (context, error, stackTrace) => Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40),
+      );
+    }
+
+    return Image.network(
+      imageData,
+      width: width,
+      height: height,
+      fit: BoxFit.cover,
+      gaplessPlayback: true,
+      errorBuilder: (context, error, stackTrace) => Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40),
+    );
   }
 
   @override
@@ -649,16 +838,47 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
               ),
             ),
             actions: [
-              IconButton(
-                icon: const Icon(Icons.chat_outlined),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const ChatListScreen(),
+              Stack(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.chat_outlined),
+                    onPressed: () async {
+                      _stopPolling();
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ChatListScreen(),
+                        ),
+                      );
+                      _startPolling();
+                    },
+                  ),
+                  if (_unreadMessageCount > 0)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
+                        child: Text(
+                          _unreadMessageCount > 9 ? '9+' : _unreadMessageCount.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
                     ),
-                  );
-                },
+                ],
               ),
               Stack(
                 children: [
@@ -792,13 +1012,25 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Categories',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: Color(0xFF2E7D32),
-                    ),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Categories',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF2E7D32),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _showAllCategoriesBottomSheet,
+                        child: const Text(
+                          'See all',
+                          style: TextStyle(color: Color(0xFF2E7D32)),
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
                   Row(
@@ -840,7 +1072,7 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const ProductListScreen(),
+                              builder: (context) => const DealListScreen(),
                             ),
                           );
                         },
@@ -852,6 +1084,7 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                     ],
                   ),
                   const SizedBox(height: 12),
+                  if (_activeDeal != null && (_activeDeal!['status']?.toString().toLowerCase() == 'active'))
                   Container(
                     height: 160,
                     decoration: BoxDecoration(
@@ -871,22 +1104,34 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'Fresh Deal',
-                                style: TextStyle(
+                              Text(
+                                _activeDeal!['deal_name'] ?? 'Fresh Deal',
+                                style: const TextStyle(
                                   color: Colors.white,
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              const Text(
-                                '20% OFF on all vegetables',
-                                style: TextStyle(
+                              Text(
+                                '${_activeDeal!['percentage']}% OFF on all ${_activeDeal!['type']}',
+                                style: const TextStyle(
                                   color: Colors.white70,
                                   fontSize: 14,
                                 ),
                               ),
+                              if (_activeDeal!['time_left'] != null)
+                                Padding(
+                                  padding: const EdgeInsets.only(top: 4.0),
+                                  child: Text(
+                                    'Ends in: ${_activeDeal!['time_left'].toString().split('.').first}',
+                                    style: const TextStyle(
+                                      color: Colors.yellowAccent,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
                               const SizedBox(height: 12),
                               ElevatedButton(
                                 onPressed: () {
@@ -928,7 +1173,21 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                         ),
                       ],
                     ),
-                  ),
+                  )
+                  else
+                    Container(
+                      height: 160,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(12),
+                        color: Colors.grey[300],
+                      ),
+                      child: const Center(
+                        child: Text(
+                          'No active offers at the moment',
+                          style: TextStyle(color: Colors.grey),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -961,7 +1220,9 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => const ProductListScreen(),
+                                builder: (context) => const ProductListScreen(
+                                  isGridView: true,
+                                ),
                               ),
                             );
                           },
@@ -970,7 +1231,7 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: _buildQuickActionButton(
-                          'My Orders',
+                          'Orders',
                           Icons.receipt_long_outlined,
                           const Color(0xFF2E7D32),
                           () {
@@ -994,9 +1255,12 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                           Icons.favorite_outline,
                           const Color(0xFF2E7D32),
                           () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Favorites feature coming soon!'),
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const ProductListScreen(
+                                  showOnlyFavorites: true,
+                                ),
                               ),
                             );
                           },
@@ -1009,9 +1273,12 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                           Icons.location_on_outlined,
                           const Color(0xFF2E7D32),
                           () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Order tracking coming soon!'),
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const ConsumerOrdersScreen(
+                                  isTrackingMode: true,
+                                ),
                               ),
                             );
                           },
@@ -1047,7 +1314,9 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const ProductListScreen(),
+                              builder: (context) => const ProductListScreen(
+                                isGridView: true,
+                              ),
                             ),
                           );
                         },
@@ -1118,6 +1387,7 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                         itemBuilder: (context, index) {
                           final product = _products[index];
                           return GestureDetector(
+                            key: ValueKey(product['uid'] ?? index),
                             onTap: () {
                               Navigator.push(
                                 context,
@@ -1156,17 +1426,10 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                                               borderRadius: const BorderRadius.vertical(
                                                 top: Radius.circular(12),
                                               ),
-                                              child: Image.network(
+                                              child: _buildProductImage(
                                                 product['image'],
                                                 width: double.infinity,
-                                                fit: BoxFit.cover,
-                                                errorBuilder: (context, error, stackTrace) {
-                                                  return const Icon(
-                                                    Icons.image,
-                                                    color: Colors.grey,
-                                                    size: 40,
-                                                  );
-                                                },
+                                                height: double.infinity,
                                               ),
                                             )
                                           : const Icon(
@@ -1258,6 +1521,7 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                   ),
                   const SizedBox(height: 12),
                   Container(
+                    width: double.infinity,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: Colors.white,
@@ -1272,35 +1536,38 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
                     ),
                     child: Column(
                       children: [
-                        const Icon(
-                          Icons.inventory_2_outlined,
+                        Icon(
+                          _orderCount > 0 ? Icons.inventory_2 : Icons.inventory_2_outlined,
                           size: 48,
-                          color: Color(0xFF2E7D32),
+                          color: const Color(0xFF2E7D32),
                         ),
                         const SizedBox(height: 12),
-                        const Text(
-                          'No orders yet',
-                          style: TextStyle(
+                        Text(
+                          'No. of orders: $_orderCount',
+                          style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                             color: Color(0xFF2E7D32),
                           ),
                         ),
                         const SizedBox(height: 4),
-                        const Text(
-                          'Start shopping to see your orders here',
-                          style: TextStyle(
+                        Text(
+                          _orderCount > 0 
+                            ? 'You have active orders in progress' 
+                            : 'Start shopping to see your orders here',
+                          style: const TextStyle(
                             fontSize: 14,
                             color: Colors.grey,
                           ),
                         ),
                         const SizedBox(height: 16),
+                        if (_orderCount == 0)
                         ElevatedButton(
                           onPressed: () {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => const ProductListScreen(),
+                                builder: (context) => const ProductListScreen(isGridView: true),
                               ),
                             );
                           },
@@ -1497,28 +1764,130 @@ class _ConsumerDashboardScreenState extends State<ConsumerDashboardScreen> {
 
   Widget _buildCategoryCard(String title, IconData icon, Color color) {
     return Expanded(
-      child: Container(
-        height: 80,
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(height: 4),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.w600,
-                color: color,
+      child: GestureDetector(
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => ProductListScreen(
+                category: title,
+                isGridView: true,
               ),
             ),
-          ],
+          );
+        },
+        child: Container(
+          height: 80,
+          decoration: BoxDecoration(
+            color: color.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: color, size: 24),
+              const SizedBox(height: 4),
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  void _showAllCategoriesBottomSheet() {
+    final categories = [
+      {'name': 'Vegetables', 'icon': Icons.eco, 'color': Colors.green},
+      {'name': 'Fruits', 'icon': Icons.apple, 'color': Colors.red},
+      {'name': 'Grains', 'icon': Icons.grain, 'color': Colors.orange},
+      {'name': 'Dairy', 'icon': Icons.egg, 'color': Colors.blue},
+      {'name': 'Meat', 'icon': Icons.kebab_dining, 'color': Colors.brown},
+      {'name': 'Herbs', 'icon': Icons.psychology_alt, 'color': Colors.teal},
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'All Categories',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF2E7D32),
+                ),
+              ),
+              const SizedBox(height: 20),
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 3,
+                  mainAxisSpacing: 16,
+                  crossAxisSpacing: 16,
+                  childAspectRatio: 1,
+                ),
+                itemCount: categories.length,
+                itemBuilder: (context, index) {
+                  final cat = categories[index];
+                  return InkWell(
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => ProductListScreen(
+                            category: cat['name'] as String,
+                            isGridView: true,
+                          ),
+                        ),
+                      );
+                    },
+                    child: Column(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: (cat['color'] as Color).withOpacity(0.1),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            cat['icon'] as IconData,
+                            color: cat['color'] as Color,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          cat['name'] as String,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

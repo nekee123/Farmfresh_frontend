@@ -26,6 +26,7 @@ class _ConsumerMyProfileScreenState extends State<ConsumerMyProfileScreen> {
   Uint8List? _profileImageBytes;
   bool _isLoading = false;
   bool _showPasswordSection = false;
+  bool _isEditing = false;
 
   @override
   void initState() {
@@ -150,7 +151,9 @@ class _ConsumerMyProfileScreenState extends State<ConsumerMyProfileScreen> {
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context);
+        setState(() {
+          _isEditing = false;
+        });
       }
     } catch (e) {
       if (mounted) {
@@ -229,10 +232,24 @@ class _ConsumerMyProfileScreenState extends State<ConsumerMyProfileScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F5F5),
       appBar: AppBar(
-        title: const Text('Edit Profile'),
+        title: Text(_isEditing ? 'Edit Profile' : 'My Profile'),
         backgroundColor: const Color(0xFF2E7D32),
         foregroundColor: Colors.white,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: Icon(_isEditing ? Icons.close : Icons.edit),
+            onPressed: () {
+              setState(() {
+                _isEditing = !_isEditing;
+                if (!_isEditing) {
+                  _loadUserData(); // Reset fields if cancelled
+                }
+              });
+            },
+            tooltip: _isEditing ? 'Cancel' : 'Edit Profile',
+          ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
@@ -273,20 +290,21 @@ class _ConsumerMyProfileScreenState extends State<ConsumerMyProfileScreen> {
                                   )
                                 : const Icon(Icons.person, size: 50, color: Colors.grey),
                           ),
-                          Positioned(
-                            bottom: 0,
-                            right: 0,
-                            child: Container(
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF2E7D32),
-                                shape: BoxShape.circle,
-                              ),
-                              child: IconButton(
-                                icon: const Icon(Icons.camera_alt, color: Colors.white, size: 20),
-                                onPressed: _pickImage,
+                          if (_isEditing)
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF2E7D32),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: IconButton(
+                                  icon: const Icon(Icons.camera_alt, color: Colors.white, size: 20),
+                                  onPressed: _pickImage,
+                                ),
                               ),
                             ),
-                          ),
                         ],
                       ),
                       const SizedBox(height: 12),
@@ -294,10 +312,11 @@ class _ConsumerMyProfileScreenState extends State<ConsumerMyProfileScreen> {
                         'Profile Picture',
                         style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                       ),
-                      const Text(
-                        'Tap camera to change photo',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                      ),
+                      if (_isEditing)
+                        const Text(
+                          'Tap camera to change photo',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
                     ],
                   ),
                 ),
@@ -324,10 +343,15 @@ class _ConsumerMyProfileScreenState extends State<ConsumerMyProfileScreen> {
                       // Full Name Field
                       TextFormField(
                         controller: _nameController,
+                        enabled: _isEditing,
                         decoration: InputDecoration(
                           labelText: 'Full Name',
                           prefixIcon: const Icon(Icons.person, color: Color(0xFF2E7D32)),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          disabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(color: Color(0xFF2E7D32)),
@@ -346,11 +370,16 @@ class _ConsumerMyProfileScreenState extends State<ConsumerMyProfileScreen> {
                       // Phone Number Field
                       TextFormField(
                         controller: _phoneController,
+                        enabled: _isEditing,
                         keyboardType: TextInputType.phone,
                         decoration: InputDecoration(
                           labelText: 'Phone Number',
                           prefixIcon: const Icon(Icons.phone, color: Color(0xFF2E7D32)),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          disabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(color: Color(0xFF2E7D32)),
@@ -369,10 +398,15 @@ class _ConsumerMyProfileScreenState extends State<ConsumerMyProfileScreen> {
                       // Location Field
                       TextFormField(
                         controller: _locationController,
+                        enabled: _isEditing,
                         decoration: InputDecoration(
                           labelText: 'Location',
                           prefixIcon: const Icon(Icons.location_on, color: Color(0xFF2E7D32)),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          disabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
                           focusedBorder: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(8),
                             borderSide: const BorderSide(color: Color(0xFF2E7D32)),
@@ -393,109 +427,112 @@ class _ConsumerMyProfileScreenState extends State<ConsumerMyProfileScreen> {
               const SizedBox(height: 20),
               
               // Password Section
-              Card(
-                elevation: 4,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                child: Padding(
-                  padding: const EdgeInsets.all(20.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text(
-                            'Password Settings',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2E7D32)),
+              if (_isEditing)
+                Card(
+                  elevation: 4,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  child: Padding(
+                    padding: const EdgeInsets.all(20.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Password Settings',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF2E7D32)),
+                            ),
+                            TextButton(
+                              onPressed: () {
+                                setState(() {
+                                  _showPasswordSection = !_showPasswordSection;
+                                });
+                              },
+                              child: Text(_showPasswordSection ? 'Hide' : 'Change'),
+                            ),
+                          ],
+                        ),
+                        
+                        if (_showPasswordSection) ...[
+                          const SizedBox(height: 16),
+                          
+                          // Current Password Field
+                          TextFormField(
+                            controller: _currentPasswordController,
+                            obscureText: true,
+                            decoration: InputDecoration(
+                              labelText: 'Current Password',
+                              prefixIcon: const Icon(Icons.lock, color: Color(0xFF2E7D32)),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(color: Color(0xFF2E7D32)),
+                              ),
+                            ),
                           ),
-                          TextButton(
-                            onPressed: () {
-                              setState(() {
-                                _showPasswordSection = !_showPasswordSection;
-                              });
-                            },
-                            child: Text(_showPasswordSection ? 'Hide' : 'Change'),
+                          
+                          const SizedBox(height: 16),
+                          
+                          // New Password Field
+                          TextFormField(
+                            controller: _newPasswordController,
+                            obscureText: true,
+                            decoration: InputDecoration(
+                              labelText: 'New Password',
+                              prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFF2E7D32)),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(color: Color(0xFF2E7D32)),
+                              ),
+                            ),
+                          ),
+                          
+                          const SizedBox(height: 16),
+                          
+                          // Confirm Password Field
+                          TextFormField(
+                            controller: _confirmPasswordController,
+                            obscureText: true,
+                            decoration: InputDecoration(
+                              labelText: 'Confirm New Password',
+                              prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFF2E7D32)),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(8),
+                                borderSide: const BorderSide(color: Color(0xFF2E7D32)),
+                              ),
+                            ),
+                          ),
+                          
+                          const SizedBox(height: 16),
+                          
+                          CustomButton(
+                            text: 'Update Password',
+                            onPressed: _changePassword,
+                            backgroundColor: const Color(0xFF2E7D32),
                           ),
                         ],
-                      ),
-                      
-                      if (_showPasswordSection) ...[
-                        const SizedBox(height: 16),
-                        
-                        // Current Password Field
-                        TextFormField(
-                          controller: _currentPasswordController,
-                          obscureText: true,
-                          decoration: InputDecoration(
-                            labelText: 'Current Password',
-                            prefixIcon: const Icon(Icons.lock, color: Color(0xFF2E7D32)),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(color: Color(0xFF2E7D32)),
-                            ),
-                          ),
-                        ),
-                        
-                        const SizedBox(height: 16),
-                        
-                        // New Password Field
-                        TextFormField(
-                          controller: _newPasswordController,
-                          obscureText: true,
-                          decoration: InputDecoration(
-                            labelText: 'New Password',
-                            prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFF2E7D32)),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(color: Color(0xFF2E7D32)),
-                            ),
-                          ),
-                        ),
-                        
-                        const SizedBox(height: 16),
-                        
-                        // Confirm Password Field
-                        TextFormField(
-                          controller: _confirmPasswordController,
-                          obscureText: true,
-                          decoration: InputDecoration(
-                            labelText: 'Confirm New Password',
-                            prefixIcon: const Icon(Icons.lock_outline, color: Color(0xFF2E7D32)),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(8),
-                              borderSide: const BorderSide(color: Color(0xFF2E7D32)),
-                            ),
-                          ),
-                        ),
-                        
-                        const SizedBox(height: 16),
-                        
-                        CustomButton(
-                          text: 'Update Password',
-                          onPressed: _changePassword,
-                          backgroundColor: const Color(0xFF2E7D32),
-                        ),
                       ],
-                    ],
+                    ),
                   ),
                 ),
-              ),
               
-              const SizedBox(height: 30),
+              if (_isEditing)
+                const SizedBox(height: 30),
               
               // Save Button
-              SizedBox(
-                width: double.infinity,
-                child: CustomButton(
-                  text: _isLoading ? 'Saving...' : 'Save Profile',
-                  onPressed: _saveProfile,
-                  backgroundColor: const Color(0xFF2E7D32),
-                  isLoading: _isLoading,
+              if (_isEditing)
+                SizedBox(
+                  width: double.infinity,
+                  child: CustomButton(
+                    text: _isLoading ? 'Saving...' : 'Save Profile',
+                    onPressed: _saveProfile,
+                    backgroundColor: const Color(0xFF2E7D32),
+                    isLoading: _isLoading,
+                  ),
                 ),
-              ),
             ],
           ),
         ),

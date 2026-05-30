@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/cart_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/api_service.dart';
 import '../../models/cart_item.dart';
 import '../../models/cart_summary.dart';
 import 'checkout_screen.dart';
@@ -96,6 +98,35 @@ class _BuyerCartScreenState extends State<BuyerCartScreen> {
     }
   }
 
+  Widget _buildProductImage(String? imageData, {double? width, double? height}) {
+    if (imageData == null || imageData.isEmpty) {
+      return Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40);
+    }
+
+    if (imageData.startsWith('data:image')) {
+      try {
+        final base64String = imageData.split(',').last;
+        return Image.memory(
+          base64Decode(base64String),
+          width: width,
+          height: height,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40),
+        );
+      } catch (e) {
+        return Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40);
+      }
+    }
+
+    return Image.network(
+      imageData,
+      width: width,
+      height: height,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -188,15 +219,7 @@ class _BuyerCartScreenState extends State<BuyerCartScreen> {
               child: productImage != null && productImage.isNotEmpty
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        productImage,
-                        width: 60,
-                        height: 60,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Icon(Icons.image, color: Colors.grey);
-                        },
-                      ),
+                      child: _buildProductImage(productImage, width: 60, height: 60),
                     )
                   : const Icon(Icons.image, color: Colors.grey),
             ),

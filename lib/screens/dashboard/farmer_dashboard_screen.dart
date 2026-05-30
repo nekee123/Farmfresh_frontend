@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'dart:async';
 import '../../services/auth_service.dart';
 import '../../services/api_service.dart';
 import '../products/add_product_screen.dart';
@@ -8,6 +9,7 @@ import '../profile/farmer_my_profile_screen.dart';
 import '../orders/farmer_orders_screen.dart';
 import '../notifications/notifications_screen.dart';
 import '../chat/chat_list_screen.dart';
+import '../analytics/seller_analytics_screen.dart';
 import '../../widgets/hamburger_menu.dart';
 
 class FarmerDashboardScreen extends StatefulWidget {
@@ -28,6 +30,8 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
   List<Map<String, dynamic>> _notifications = [];
   bool _showNotificationCard = false;
   int _unreadCount = 0;
+  int _unreadMessageCount = 0;
+  Timer? _pollingTimer;
 
   @override
   void initState() {
@@ -36,6 +40,45 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
     _loadProductCount();
     _loadSellerStats();
     _loadNotifications();
+    _loadUnreadMessageCount();
+    _startPolling();
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startPolling() {
+    _pollingTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      _loadNotifications();
+      _loadUnreadMessageCount();
+    });
+  }
+
+  void _stopPolling() {
+    _pollingTimer?.cancel();
+    _pollingTimer = null;
+  }
+
+  Future<void> _loadUnreadMessageCount() async {
+    try {
+      final response = await ApiService.getConversations();
+      if (response.success && response.data != null) {
+        int total = 0;
+        for (var conv in response.data!) {
+          total += (conv['unread_count'] as num? ?? 0).toInt();
+        }
+        if (mounted) {
+          setState(() {
+            _unreadMessageCount = total;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading unread message count: $e');
+    }
   }
 
   @override
@@ -58,8 +101,15 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
     try {
       final response = await ApiService.getNotifications();
       if (response.success && response.data != null) {
+        final List<Map<String, dynamic>> allNotifications = response.data!;
+        
+        // Filter out notifications with null sender_name or product_name
+        final validNotifications = allNotifications.where((n) {
+          return n['sender_name'] != null && n['product_name'] != null;
+        }).toList();
+
         setState(() {
-          _notifications = response.data!;
+          _notifications = validNotifications;
           _unreadCount = _notifications.where((n) => (n['is_read'] ?? false) == false).length;
         });
       }
@@ -118,8 +168,15 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
     try {
       final response = await ApiService.getNotifications();
       if (response.success && response.data != null) {
+        final List<Map<String, dynamic>> allNotifications = response.data!;
+        
+        // Filter out notifications with null sender_name or product_name
+        final validNotifications = allNotifications.where((n) {
+          return n['sender_name'] != null && n['product_name'] != null;
+        }).toList();
+
         setState(() {
-          _notifications = response.data!;
+          _notifications = validNotifications;
           _unreadCount = _notifications.where((n) => (n['is_read'] ?? false) == false).length;
           _showNotificationCard = true;
         });
@@ -134,7 +191,12 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
     try {
       final response = await ApiService.getNotifications();
       if (response.success && response.data != null) {
-        _notifications = response.data!;
+        final List<Map<String, dynamic>> allNotifications = response.data!;
+        
+        // Filter out notifications with null sender_name or product_name
+        _notifications = allNotifications.where((n) {
+          return n['sender_name'] != null && n['product_name'] != null;
+        }).toList();
       }
     } catch (e) {
       print('Error loading notifications: $e');
@@ -266,6 +328,12 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
         message = 'The seller $senderName has marked your order for $productName as delivered';
         icon = Icons.local_shipping;
         iconColor = Colors.green;
+        break;
+      case 'new_review':
+        title = 'New Review';
+        message = '$senderName left a review for $productName';
+        icon = Icons.star;
+        iconColor = Colors.amber;
         break;
       default:
         title = 'Notification';
@@ -450,18 +518,40 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
 
   Future<void> _loadSellerRating() async {
     final authService = Provider.of<AuthService>(context, listen: false);
-    if (authService.currentUser?.uid != null) {
+    final sellerId = authService.currentUser?.uid;
+    
+    if (sellerId != null) {
       try {
-        final response = await ApiService.getSellerRating(authService.currentUser!.uid);
-        if (response.success && mounted) {
-          setState(() {
-            _sellerRating = response.data ?? 0.0;
-            _isLoadingRating = false;
-          });
-        } else if (mounted) {
-          setState(() {
-            _isLoadingRating = false;
-          });
+        // Try fetching reviews directly to calculate rating
+        final response = await ApiService.getSellerReviews(sellerId);
+        
+        if (response.success && response.data != null) {
+          final reviews = response.data!;
+          double avgRating = 0.0;
+          
+          if (reviews.isNotEmpty) {
+            double totalStars = 0;
+            for (var review in reviews) {
+              totalStars += (review['rating'] as num?)?.toDouble() ?? 0.0;
+            }
+            avgRating = totalStars / reviews.length;
+          }
+          
+          if (mounted) {
+            setState(() {
+              _sellerRating = avgRating;
+              _isLoadingRating = false;
+            });
+          }
+        } else {
+          // Fallback to the dedicated rating endpoint if reviews fail
+          final ratingResponse = await ApiService.getSellerRating(sellerId);
+          if (mounted) {
+            setState(() {
+              _sellerRating = ratingResponse.data ?? 0.0;
+              _isLoadingRating = false;
+            });
+          }
         }
       } catch (e) {
         print('Error loading seller rating: $e');
@@ -593,16 +683,47 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
               ),
             ),
             actions: [
-              IconButton(
-                icon: const Icon(Icons.chat_outlined),
-                onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const ChatListScreen(),
+              Stack(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.chat_outlined),
+                    onPressed: () async {
+                      _stopPolling();
+                      await Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const ChatListScreen(),
+                        ),
+                      );
+                      _startPolling();
+                    },
+                  ),
+                  if (_unreadMessageCount > 0)
+                    Positioned(
+                      right: 8,
+                      top: 8,
+                      child: Container(
+                        padding: const EdgeInsets.all(2),
+                        decoration: BoxDecoration(
+                          color: Colors.red,
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        constraints: const BoxConstraints(
+                          minWidth: 18,
+                          minHeight: 18,
+                        ),
+                        child: Text(
+                          _unreadMessageCount > 9 ? '9+' : _unreadMessageCount.toString(),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
                     ),
-                  );
-                },
+                ],
               ),
               Stack(
                 children: [
@@ -661,11 +782,39 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: _buildStatCard('Products', _isLoadingProductCount ? '...' : '$_productCount', Icons.inventory_2, Colors.green),
+                        child: _buildStatCard(
+                          'Products', 
+                          _isLoadingProductCount ? '...' : '$_productCount', 
+                          Icons.inventory_2, 
+                          Colors.green,
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => ProductListScreen(
+                                  sellerId: authService.currentUser?.uid,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
-                        child: _buildStatCard('Orders', '0', Icons.shopping_bag, Colors.blue),
+                        child: _buildStatCard(
+                          'Orders', 
+                          _isLoadingStats ? 'Loading...' : '$_orderCount', 
+                          Icons.shopping_bag, 
+                          Colors.blue,
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const FarmerOrdersScreen(),
+                              ),
+                            );
+                          },
+                        ),
                       ),
                     ],
                   ),
@@ -677,7 +826,15 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
                           'Revenue', 
                           _isLoadingStats ? 'Loading...' : '₱${_totalRevenue.toStringAsFixed(0)}', 
                           Icons.attach_money, 
-                          Colors.orange
+                          Colors.orange,
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const SellerAnalyticsScreen(),
+                              ),
+                            );
+                          },
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -686,29 +843,15 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
                           'Rating', 
                           _isLoadingRating ? 'Loading...' : '${_sellerRating.toStringAsFixed(1)}★', 
                           Icons.star, 
-                          Colors.amber
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildStatCard(
-                          'Orders', 
-                          _isLoadingStats ? 'Loading...' : '$_orderCount', 
-                          Icons.receipt_long, 
-                          Colors.blue
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _buildStatCard(
-                          'Products', 
-                          _isLoadingProductCount ? 'Loading...' : '$_productCount', 
-                          Icons.inventory_2, 
-                          Colors.green
+                          Colors.amber,
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const FarmerMyProfileScreen(),
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ],
@@ -767,7 +910,9 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) => const ProductListScreen(),
+                                builder: (context) => ProductListScreen(
+                                  sellerId: authService.currentUser?.uid,
+                                ),
                               ),
                             );
                           },
@@ -796,13 +941,14 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
                       const SizedBox(width: 8),
                       Expanded(
                         child: _buildQuickActionButton(
-                          'Analytics',
+                          'Sales',
                           Icons.analytics_outlined,
                           const Color(0xFF2E7D32),
                           () {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Analytics coming soon!'),
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => const SellerAnalyticsScreen(),
                               ),
                             );
                           },
@@ -815,110 +961,6 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
             ),
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 24)),
-          // Recent Orders
-          SliverToBoxAdapter(
-            child: Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Recent Orders',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF2E7D32),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const FarmerOrdersScreen(),
-                            ),
-                          );
-                        },
-                        child: const Text(
-                          'View all',
-                          style: TextStyle(color: Color(0xFF2E7D32)),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.08),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        const Icon(
-                          Icons.inventory_2_outlined,
-                          size: 48,
-                          color: Color(0xFF2E7D32),
-                        ),
-                        const SizedBox(height: 12),
-                        const Text(
-                          'No orders yet',
-                          style: TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            color: Color(0xFF2E7D32),
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'Orders from customers will appear here',
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey,
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        ElevatedButton(
-                          onPressed: () async {
-                            final result = await Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) => AddProductScreen(
-                                  sellerId: authService.currentUser?.uid ?? '',
-                                ),
-                              ),
-                            );
-                            if (result == true && mounted) {
-                              // Refresh all stats after adding a product
-                              _refreshAllStats();
-                            }
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2E7D32),
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          child: const Text('Add First Product'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
           const SliverToBoxAdapter(child: SizedBox(height: 24)),
           // Performance Chart
           SliverToBoxAdapter(
@@ -936,46 +978,56 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Container(
-                    height: 200,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.08),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (context) => const SellerAnalyticsScreen(),
                         ),
-                      ],
-                    ),
-                    child: const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(
-                            Icons.trending_up,
-                            size: 48,
-                            color: Color(0xFF2E7D32),
-                          ),
-                          const SizedBox(height: 12),
-                          const Text(
-                            'Track your farm performance',
-                            style: TextStyle(
-                              fontSize: 16,
-                              color: Color(0xFF2E7D32),
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          const Text(
-                            'Analytics dashboard coming soon',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey,
-                            ),
+                      );
+                    },
+                    child: Container(
+                      height: 200,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.08),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
                           ),
                         ],
+                      ),
+                      child: const Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.trending_up,
+                              size: 48,
+                              color: Color(0xFF2E7D32),
+                            ),
+                            const SizedBox(height: 12),
+                            const Text(
+                              'Track your farm performance',
+                              style: TextStyle(
+                                fontSize: 16,
+                                color: Color(0xFF2E7D32),
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            const Text(
+                              'Click to view detailed sales analytics',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
@@ -1163,9 +1215,8 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
     );
   }
 
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
+  Widget _buildStatCard(String title, String value, IconData icon, Color color, {VoidCallback? onTap}) {
     return Container(
-      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
@@ -1177,33 +1228,43 @@ class _FarmerDashboardScreenState extends State<FarmerDashboardScreen> {
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(icon, color: color, size: 20),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.grey[700],
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(12),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(icon, color: color, size: 20),
+                    const SizedBox(width: 8),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700],
+                      ),
+                    ),
+                  ],
                 ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            value,
-            style: TextStyle(
-              fontSize: 24,
-              fontWeight: FontWeight.bold,
-              color: color,
+                const SizedBox(height: 8),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: color,
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }

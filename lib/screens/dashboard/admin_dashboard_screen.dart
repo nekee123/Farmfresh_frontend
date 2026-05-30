@@ -4,6 +4,8 @@ import '../../services/auth_service.dart';
 import '../../services/api_service.dart';
 import '../users/admin_users_screen.dart';
 import '../products/admin_products_screen.dart';
+import '../orders/admin_orders_screen.dart';
+import '../admin/admin_deals_screen.dart';
 import '../../widgets/hamburger_menu.dart';
 
 class AdminDashboardScreen extends StatefulWidget {
@@ -28,17 +30,27 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
 
   Future<void> _loadStatistics() async {
     try {
-      final usersResponse = await ApiService.getTotalUsers();
-      final productsResponse = await ApiService.getTotalProducts();
-      final ordersResponse = await ApiService.getTotalOrders();
-      final farmersResponse = await ApiService.getTotalFarmers();
+      final usersResponse = await ApiService.getAllUsers();
+      final productsResponse = await ApiService.getProducts();
+      final ordersResponse = await ApiService.getAllOrders();
 
       if (mounted) {
         setState(() {
-          _totalUsers = usersResponse.success ? usersResponse.data ?? 0 : 0;
-          _totalProducts = productsResponse.success ? productsResponse.data ?? 0 : 0;
-          _totalOrders = ordersResponse.success ? ordersResponse.data ?? 0 : 0;
-          _totalFarmers = farmersResponse.success ? farmersResponse.data ?? 0 : 0;
+          if (usersResponse.success && usersResponse.data != null) {
+            _totalUsers = usersResponse.data!.length;
+            _totalFarmers = usersResponse.data!
+                .where((user) => user['role']?.toString().toLowerCase() == 'seller')
+                .length;
+          }
+          
+          if (productsResponse.success && productsResponse.data != null) {
+            _totalProducts = productsResponse.data!.length;
+          }
+          
+          if (ordersResponse.success && ordersResponse.data != null) {
+            _totalOrders = ordersResponse.data!.length;
+          }
+
           _isLoading = false;
         });
       }
@@ -71,10 +83,18 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
         foregroundColor: Colors.white,
         actions: [
           IconButton(
-            icon: const Icon(Icons.notifications_outlined),
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh Statistics',
             onPressed: () {
+              setState(() {
+                _isLoading = true;
+              });
+              _loadStatistics();
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Admin notifications coming soon!')),
+                const SnackBar(
+                  content: Text('Statistics updated'),
+                  duration: Duration(seconds: 1),
+                ),
               );
             },
           ),
@@ -214,22 +234,24 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   Icons.receipt,
                   Colors.orange,
                   () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Order management coming soon!'),
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AdminOrdersScreen(),
                       ),
                     );
                   },
                 ),
                 _buildActionCard(
                   context,
-                  'Reports',
-                  Icons.analytics,
+                  'Deals',
+                  Icons.local_offer,
                   Colors.purple,
                   () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Reports coming soon!'),
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AdminDealsScreen(),
                       ),
                     );
                   },

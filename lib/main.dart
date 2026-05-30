@@ -15,6 +15,7 @@ import 'screens/orders/consumer_orders_screen.dart';
 import 'screens/orders/farmer_orders_screen.dart';
 import 'screens/users/admin_users_screen.dart';
 import 'screens/buyer/buyer_cart_screen.dart';
+import 'screens/auth/otp_verification_screen.dart';
 import 'services/auth_service.dart';
 
 void main() async {
@@ -87,6 +88,10 @@ class _FarmFreshAppState extends State<FarmFreshApp> {
           routes: {
             '/login': (context) => const LoginScreen(),
             '/register': (context) => const RegisterScreen(),
+            '/verify_otp': (context) {
+              final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>;
+              return OtpVerificationScreen(phoneNumber: args['phoneNumber']);
+            },
             '/consumer_dashboard': (context) => const ConsumerDashboardScreen(),
             '/farmer_dashboard': (context) => const FarmerDashboardScreen(),
             '/admin_dashboard': (context) => const AdminDashboardScreen(),

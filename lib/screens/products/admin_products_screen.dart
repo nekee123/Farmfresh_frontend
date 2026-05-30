@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 
@@ -107,6 +108,35 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
     }
   }
 
+  Widget _buildProductImage(String? imageData, {double? width, double? height}) {
+    if (imageData == null || imageData.isEmpty) {
+      return Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40);
+    }
+
+    if (imageData.startsWith('data:image')) {
+      try {
+        final base64String = imageData.split(',').last;
+        return Image.memory(
+          base64Decode(base64String),
+          width: width,
+          height: height,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40),
+        );
+      } catch (e) {
+        return Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40);
+      }
+    }
+
+    return Image.network(
+      imageData,
+      width: width,
+      height: height,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -156,19 +186,7 @@ class _AdminProductsScreenState extends State<AdminProductsScreen> {
                               leading: product['image'] != null
                                   ? ClipRRect(
                                       borderRadius: BorderRadius.circular(8),
-                                      child: Image.network(
-                                        product['image'],
-                                        width: 60,
-                                        height: 60,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (context, error, stackTrace) {
-                                          return const Icon(
-                                            Icons.image_not_supported,
-                                            size: 60,
-                                            color: Colors.grey,
-                                          );
-                                        },
-                                      ),
+                                      child: _buildProductImage(product['image'], width: 60, height: 60),
                                     )
                                   : Container(
                                       width: 60,

@@ -1,11 +1,16 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/api_service.dart';
 import '../profile/seller_profile_screen.dart';
+import '../products/product_detail_screen.dart';
+import '../chat/chat_screen.dart';
+import 'order_tracking_screen.dart';
 
 class ConsumerOrdersScreen extends StatefulWidget {
-  const ConsumerOrdersScreen({super.key});
+  final bool isTrackingMode;
+  const ConsumerOrdersScreen({super.key, this.isTrackingMode = false});
 
   @override
   State<ConsumerOrdersScreen> createState() => _ConsumerOrdersScreenState();
@@ -124,11 +129,40 @@ class _ConsumerOrdersScreenState extends State<ConsumerOrdersScreen> {
     }
   }
 
+  Widget _buildProductImage(String? imageData, {double? width, double? height}) {
+    if (imageData == null || imageData.isEmpty) {
+      return Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40);
+    }
+
+    if (imageData.startsWith('data:image')) {
+      try {
+        final base64String = imageData.split(',').last;
+        return Image.memory(
+          base64Decode(base64String),
+          width: width,
+          height: height,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40),
+        );
+      } catch (e) {
+        return Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40);
+      }
+    }
+
+    return Image.network(
+      imageData,
+      width: width,
+      height: height,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('My Orders'),
+        title: Text(widget.isTrackingMode ? 'Track Orders' : 'My Orders'),
         backgroundColor: const Color(0xFF2E7D32),
         foregroundColor: Colors.white,
       ),
@@ -248,15 +282,7 @@ class _ConsumerOrdersScreenState extends State<ConsumerOrdersScreen> {
               child: productImage != null && productImage.isNotEmpty
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        productImage,
-                        width: 80,
-                        height: 80,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Icon(Icons.image, color: Colors.grey);
-                        },
-                      ),
+                      child: _buildProductImage(productImage, width: 80, height: 80),
                     )
                   : const Icon(Icons.image, color: Colors.grey),
             ),
@@ -279,7 +305,7 @@ class _ConsumerOrdersScreenState extends State<ConsumerOrdersScreen> {
                           ),
                         ),
                       ),
-                      _buildStatusChip(status),
+                      if (!widget.isTrackingMode) _buildStatusChip(status),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -287,31 +313,79 @@ class _ConsumerOrdersScreenState extends State<ConsumerOrdersScreen> {
                   _buildOrderDetail('Quantity', quantity.toString()),
                   _buildOrderDetail('Total Price', '₱$totalPrice'),
                   _buildOrderDetail('Payment Method', paymentMethod),
+                  _buildOrderDetail('Delivery Address', order['buyer_address'] ?? 'N/A'),
                   const SizedBox(height: 12),
-                  if (status.toLowerCase() == 'pending')
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () => _cancelOrder(order['uid']),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
-                        ),
-                        child: const Text('Cancel Order'),
+                  // Message Seller Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ChatScreen(
+                              sellerId: order['seller_uid'],
+                              sellerName: order['seller_name'],
+                              sellerPhoneNumber: order['seller_contact'],
+                            ),
+                          ),
+                        );
+                      },
+                      icon: const Icon(Icons.message_outlined, size: 18),
+                      label: const Text('Message Seller'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF2E7D32),
+                        side: const BorderSide(color: Color(0xFF2E7D32)),
                       ),
                     ),
-                  if (status.toLowerCase() == 'delivered')
+                  ),
+                  const SizedBox(height: 8),
+                  if (widget.isTrackingMode)
                     SizedBox(
                       width: double.infinity,
-                      child: ElevatedButton(
-                        onPressed: () => _handleReviewButton(order),
+                      child: ElevatedButton.icon(
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => OrderTrackingScreen(order: order),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.location_searching, size: 18),
+                        label: const Text('Track Status'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF2E7D32),
                           foregroundColor: Colors.white,
                         ),
-                        child: Text(_orderReviews.containsKey(order['uid']) ? 'View Review' : 'Write a Review'),
                       ),
                     ),
+                  if (!widget.isTrackingMode) ...[
+                    if (status.toLowerCase() == 'pending')
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () => _cancelOrder(order['uid']),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                          ),
+                          child: const Text('Cancel Order'),
+                        ),
+                      ),
+                    if (status.toLowerCase() == 'delivered')
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: () => _handleReviewButton(order),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF2E7D32),
+                            foregroundColor: Colors.white,
+                          ),
+                          child: Text(_orderReviews.containsKey(order['uid']) ? 'View Review' : 'Write a Review'),
+                        ),
+                      ),
+                  ],
                 ],
               ),
             ),
@@ -321,21 +395,41 @@ class _ConsumerOrdersScreenState extends State<ConsumerOrdersScreen> {
     );
   }
 
-  void _handleReviewButton(Map<String, dynamic> order) {
+  Future<void> _handleReviewButton(Map<String, dynamic> order) async {
     final orderUid = order['uid'] as String?;
     if (orderUid != null && _orderReviews.containsKey(orderUid)) {
-      // Navigate to seller profile to view reviews
-      final sellerUid = order['seller_uid'];
-      if (sellerUid != null) {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => SellerProfileScreen(
-              sellerId: sellerUid,
-              buyerId: Provider.of<AuthService>(context, listen: false).currentUser?.uid,
-            ),
-          ),
-        );
+      // Navigate to product detail to view reviews
+      final productUid = order['farm_product_uid'];
+      if (productUid != null) {
+        setState(() => _isLoading = true);
+        try {
+          final response = await ApiService.getProduct(productUid);
+          if (response.success && response.data != null) {
+            if (mounted) {
+              setState(() => _isLoading = false);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ProductDetailScreen(product: response.data!),
+                ),
+              );
+            }
+          } else {
+            if (mounted) {
+              setState(() => _isLoading = false);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Could not load product details: ${response.error}')),
+              );
+            }
+          }
+        } catch (e) {
+          if (mounted) {
+            setState(() => _isLoading = false);
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Error: $e')),
+            );
+          }
+        }
       }
     } else {
       // Create new review

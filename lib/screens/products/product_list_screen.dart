@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/auth_service.dart';
@@ -8,8 +9,19 @@ import 'product_detail_screen.dart';
 import 'add_product_screen.dart';
 
 class ProductListScreen extends StatefulWidget {
-  const ProductListScreen({super.key, this.refreshKey});
+  const ProductListScreen({
+    super.key, 
+    this.refreshKey, 
+    this.sellerId, 
+    this.showOnlyFavorites = false,
+    this.isGridView = false,
+    this.category,
+  });
   final int? refreshKey;
+  final String? sellerId;
+  final bool showOnlyFavorites;
+  final bool isGridView;
+  final String? category;
 
   @override
   State<ProductListScreen> createState() => _ProductListScreenState();
@@ -20,6 +32,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
   bool _isLoading = false;
   String? _error;
   int _refreshKey = 0;
+  List<Map<String, dynamic>> _activeDeals = [];
 
   @override
   void initState() {
@@ -27,6 +40,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
     // Always fetch products when screen is first loaded
     print('🔄 Initial load, fetching products...');
     _fetchProducts();
+    _loadActiveDeals();
     
     // Disabled periodic refresh to prevent conflicts
     // _refreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
@@ -79,24 +93,48 @@ class _ProductListScreenState extends State<ProductListScreen> {
     });
 
     try {
-      print('🌐 Fetching products from API...');
-      final response = await ApiService.getProducts();
+      print('🌐 Fetching products...');
+      ApiResponse<List<Map<String, dynamic>>> response;
+      
+      // Fetch products and deal in parallel
+      final results = await Future.wait([
+        widget.showOnlyFavorites ? ApiService.getFavorites() : ApiService.getProducts(),
+        ApiService.getActiveDeals(),
+      ]);
+
+      response = results[0] as ApiResponse<List<Map<String, dynamic>>>;
+      final dealsResponse = results[1] as ApiResponse<List<Map<String, dynamic>>>;
+
       print('📥 API Response: success=${response.success}, error=${response.error}');
       
       if (response.success && response.data != null) {
         print('📊 Products data received: ${response.data}');
         print('📊 Products count: ${response.data!.length}');
-        print('📊 Response data type: ${response.data.runtimeType}');
         
-        // Log each product for debugging
-        for (int i = 0; i < response.data!.length; i++) {
-          final product = response.data![i];
-          print('📦 Product $i: ${product['name']} (UID: ${product['uid']})');
-          print('📦 Product $i type: ${product.runtimeType}');
+        List<Map<String, dynamic>> products = response.data!;
+        
+        // Filter by sellerId if provided
+        if (widget.sellerId != null) {
+          print('🔍 Filtering products for seller: ${widget.sellerId}');
+          products = products.where((p) => p['seller_uid'] == widget.sellerId).toList();
+          print('📊 Filtered products count: ${products.length}');
+        }
+
+        // Filter by category if provided
+        if (widget.category != null && widget.category!.isNotEmpty) {
+          print('🔍 Filtering products for category: ${widget.category}');
+          products = products.where((p) => 
+            (p['type'] ?? p['category'] ?? '').toString().toLowerCase() == 
+            widget.category!.toLowerCase()
+          ).toList();
+          print('📊 Category Filtered products count: ${products.length}');
         }
         
         setState(() {
-          _products = response.data!;
+          _products = products;
+          if (dealsResponse.success) {
+            _activeDeals = dealsResponse.data ?? [];
+          }
           _isLoading = false;
         });
         
@@ -124,6 +162,22 @@ class _ProductListScreenState extends State<ProductListScreen> {
       _refreshKey++; // Force UI rebuild
     });
     await _fetchProducts();
+    await _loadActiveDeals();
+  }
+
+  Future<void> _loadActiveDeals() async {
+    try {
+      final response = await ApiService.getActiveDeals();
+      if (response.success && response.data != null) {
+        if (mounted) {
+          setState(() {
+            _activeDeals = response.data!;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading active deals: $e');
+    }
   }
 
   Future<void> _deleteProduct(Map<String, dynamic> product) async {
@@ -217,6 +271,35 @@ class _ProductListScreenState extends State<ProductListScreen> {
     });
   }
 
+  Widget _buildProductImage(String? imageData, {double? width, double? height}) {
+    if (imageData == null || imageData.isEmpty) {
+      return Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40);
+    }
+
+    if (imageData.startsWith('data:image')) {
+      try {
+        final base64String = imageData.split(',').last;
+        return Image.memory(
+          base64Decode(base64String),
+          width: width,
+          height: height,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40),
+        );
+      } catch (e) {
+        return Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40);
+      }
+    }
+
+    return Image.network(
+      imageData,
+      width: width,
+      height: height,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40),
+    );
+  }
+
   Widget _buildContent() {
     if (_isLoading) {
       return const Center(
@@ -283,6 +366,23 @@ class _ProductListScreenState extends State<ProductListScreen> {
       );
     }
 
+    if (widget.isGridView) {
+      return GridView.builder(
+        padding: const EdgeInsets.all(16),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          childAspectRatio: 0.75,
+          crossAxisSpacing: 16,
+          mainAxisSpacing: 16,
+        ),
+        itemCount: _products.length,
+        itemBuilder: (context, index) {
+          final product = _products[index];
+          return _buildGridProductCard(product);
+        },
+      );
+    }
+
     return ListView.builder(
       padding: const EdgeInsets.all(16),
       itemCount: _products.length,
@@ -306,18 +406,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
               child: product['image'] != null && product['image'].isNotEmpty
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        product['image'],
-                        width: 60,
-                        height: 60,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Icon(
-                            Icons.image,
-                            color: Colors.grey,
-                          );
-                        },
-                      ),
+                      child: _buildProductImage(product['image'], width: 60, height: 60),
                     )
                   : const Icon(
                       Icons.image,
@@ -334,14 +423,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
             subtitle: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  '₱${product['price']?.toString() ?? '0'}',
-                  style: const TextStyle(
-                    color: Color(0xFF2E7D32),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
+                _buildPriceDisplay(product),
                 const SizedBox(height: 4),
                 Text(
                   'Stock: ${product['quantity']?.toString() ?? '0'}',
@@ -379,7 +461,7 @@ class _ProductListScreenState extends State<ProductListScreen> {
                       const SizedBox(width: 8),
                       Container(
                         decoration: BoxDecoration(
-                          color: Colors.black87,
+                          color: Colors.red,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: IconButton(
@@ -394,16 +476,178 @@ class _ProductListScreenState extends State<ProductListScreen> {
                   )
                 : const Icon(Icons.arrow_forward_ios, size: 16),
             onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Product: ${product['name']}\nPrice: ₱${product['price']}'),
-                  duration: const Duration(seconds: 2),
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ProductDetailScreen(product: product),
                 ),
               );
             },
           ),
         );
       },
+    );
+  }
+
+  Widget _buildGridProductCard(Map<String, dynamic> product) {
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ProductDetailScreen(product: product),
+          ),
+        );
+      },
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 8,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.grey[200],
+                  borderRadius: const BorderRadius.vertical(
+                    top: Radius.circular(12),
+                  ),
+                ),
+                child: product['image'] != null && product['image'].isNotEmpty
+                    ? ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                          top: Radius.circular(12),
+                        ),
+                        child: _buildProductImage(
+                          product['image'],
+                          width: double.infinity,
+                          height: double.infinity,
+                        ),
+                      )
+                    : const Center(
+                        child: Icon(
+                          Icons.image,
+                          color: Colors.grey,
+                          size: 40,
+                        ),
+                      ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    product['name'] ?? 'Unknown',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  _buildPriceDisplay(product, isGrid: true),
+                  const SizedBox(height: 4),
+                  Text(
+                    product['type'] ?? 'Unknown',
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 10,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPriceDisplay(Map<String, dynamic> product, {bool isGrid = false}) {
+    final originalPrice = double.tryParse(product['price']?.toString() ?? '0') ?? 0.0;
+    final productType = product['type'];
+    
+    double discountedPrice = originalPrice;
+    bool hasDiscount = false;
+    double percentage = 0;
+
+    // Find if there's an active deal for this product type
+    final matchingDeal = _activeDeals.firstWhere(
+      (deal) => deal['type'] == productType,
+      orElse: () => {},
+    );
+
+    if (matchingDeal.isNotEmpty) {
+      percentage = (matchingDeal['percentage'] as num?)?.toDouble() ?? 0.0;
+      if (percentage > 0) {
+        discountedPrice = originalPrice * (1 - percentage / 100);
+        hasDiscount = true;
+      }
+    }
+
+    if (!hasDiscount) {
+      return Text(
+        '₱${originalPrice.toStringAsFixed(2)}',
+        style: TextStyle(
+          color: const Color(0xFF2E7D32),
+          fontWeight: FontWeight.bold,
+          fontSize: isGrid ? 12 : 14,
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              '₱${originalPrice.toStringAsFixed(2)}',
+              style: TextStyle(
+                fontSize: isGrid ? 10 : 12,
+                color: Colors.grey[500],
+                decoration: TextDecoration.lineThrough,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: Colors.red[50],
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '${percentage.toInt()}% OFF',
+                style: const TextStyle(
+                  fontSize: 8,
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        Text(
+          '₱${discountedPrice.toStringAsFixed(2)}',
+          style: TextStyle(
+            color: const Color(0xFF2E7D32),
+            fontWeight: FontWeight.bold,
+            fontSize: isGrid ? 12 : 14,
+          ),
+        ),
+      ],
     );
   }
 
@@ -426,11 +670,11 @@ class _ProductListScreenState extends State<ProductListScreen> {
     return Scaffold(
       key: ValueKey(_refreshKey),
       appBar: AppBar(
-        title: const Text('Products'),
+        title: Text(widget.showOnlyFavorites ? 'Favorites' : 'Products'),
         backgroundColor: const Color(0xFF2E7D32),
         foregroundColor: Colors.white,
         actions: [
-          if (authService.currentUser?.userType == 'farmer')
+          if (authService.currentUser?.userType == 'farmer' && !widget.showOnlyFavorites)
             IconButton(
               icon: const Icon(Icons.add),
               onPressed: () {
@@ -446,21 +690,6 @@ class _ProductListScreenState extends State<ProductListScreen> {
         },
         child: Column(
           children: [
-            // Temporary debug button
-            Container(
-              margin: const EdgeInsets.all(8),
-              child: ElevatedButton(
-                onPressed: () {
-                  print('🐛 DEBUG: Manual refresh triggered');
-                  _refreshProducts();
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  foregroundColor: Colors.white,
-                ),
-                child: const Text('DEBUG: Refresh Products'),
-              ),
-            ),
             Expanded(
               child: _buildContent(),
             ),

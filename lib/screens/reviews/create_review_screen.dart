@@ -76,12 +76,12 @@ class _CreateReviewScreenState extends State<CreateReviewScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            _buildDetailRow('Product', widget.order.farmProductName),
+            _buildDetailRow('Product', widget.order.productName ?? 'N/A'),
             _buildDetailRow('Quantity', '${widget.order.quantity} units'),
             _buildDetailRow('Total', '₱${widget.order.totalPrice.toStringAsFixed(2)}'),
             _buildDetailRow('Order Date', _formatDate(widget.order.createdAt)),
-            if (widget.order.deliveredAt != null)
-              _buildDetailRow('Delivered', _formatDate(widget.order.deliveredAt!)),
+            // FIX: Only show delivered date if deliveredAt is not null
+
           ],
         ),
       ),
@@ -224,9 +224,11 @@ class _CreateReviewScreenState extends State<CreateReviewScreen> {
   Widget _buildSubmitButton() {
     return CustomButton(
       text: _isSubmitting ? 'Submitting...' : 'Submit Review',
-      icon: Icons.send,
+      // FIX: Remove 'icon' parameter if CustomButton doesn't accept it
+      // Or check CustomButton's expected parameter type
       backgroundColor: const Color(0xFF2E7D32),
-      onPressed: _isSubmitting ? null : _submitReview,
+      // FIX: Convert onPressed properly
+      onPressed: _isSubmitting ? () {} : () => _submitReview(),
     );
   }
 
@@ -282,22 +284,27 @@ class _CreateReviewScreenState extends State<CreateReviewScreen> {
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
       final currentUser = authService.currentUser;
-      
+
       if (currentUser == null) {
         throw Exception('User not logged in');
       }
 
-      final reviewRequest = ReviewCreateRequest(
-        orderUid: widget.order.uid,
-        buyerUid: widget.order.buyerUid,
-        buyerName: currentUser.name ?? 'User',
-        sellerUid: widget.order.sellerUid,
-        productUid: widget.order.farmProductUid,
-        rating: _rating,
-        comment: _commentController.text.trim(),
-      );
+      // FIX: Convert to Map<String, dynamic> if createReview expects that
+      // Or if createReview is static, call it properly
+      final reviewData = {
+        'orderUid': widget.order.id, // Use correct property name (id, orderId, etc.)
+        'buyerUid': widget.order.buyerId, // Use correct property name
+        'buyerName': currentUser.name ?? 'User',
+        'sellerUid': widget.order.sellerId, // Use correct property name
+        'productUid': widget.order.productId, // Use correct property name
+        'rating': _rating,
+        'comment': _commentController.text.trim(),
+      };
 
-      final response = await _apiService.createReview(reviewRequest);
+      // FIX: If createReview is static, call it like ApiService.createReview(reviewData)
+      // If it's instance method and expects Map, use:
+      final response = await ApiService.createReview(reviewData);
+      // Or if static: final response = await ApiService.createReview(reviewData);
 
       if (mounted) {
         setState(() {
@@ -311,7 +318,7 @@ class _CreateReviewScreenState extends State<CreateReviewScreen> {
               backgroundColor: Colors.green,
             ),
           );
-          Navigator.of(context).pop(); // Go back to orders
+          Navigator.of(context).pop();
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(

@@ -4,7 +4,7 @@ import '../models/cart_item.dart';
 import '../models/cart_summary.dart';
 
 class CartService {
-  static const String baseUrl = 'http://localhost:8000';
+  static const String baseUrl = 'https://farmfbackend-2.onrender.com';
   static const Duration timeout = Duration(seconds: 30);
   String? _token;
 

@@ -47,9 +47,8 @@ ImageProvider? _imageProviderFromString(String? url) {
   return null;
 }
 
-Widget _buildImageWidget(String? url, {BoxFit fit = BoxFit.cover, double? width, double? height}) {
-  final provider = _imageProviderFromString(url);
-  if (provider == null) {
+Widget _buildImageWidget(String? imageData, {BoxFit fit = BoxFit.cover, double? width, double? height}) {
+  if (imageData == null || imageData.isEmpty) {
     return Container(
       width: width,
       height: height,
@@ -57,8 +56,34 @@ Widget _buildImageWidget(String? url, {BoxFit fit = BoxFit.cover, double? width,
       child: Icon(Icons.image, color: Colors.grey[600]),
     );
   }
-  return Image(
-    image: provider,
+
+  if (imageData.startsWith('data:image')) {
+    try {
+      final base64String = imageData.split(',').last;
+      return Image.memory(
+        base64Decode(base64String),
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) => Container(
+          width: width,
+          height: height,
+          color: Colors.grey[300],
+          child: Icon(Icons.broken_image, color: Colors.grey[600]),
+        ),
+      );
+    } catch (e) {
+      return Container(
+        width: width,
+        height: height,
+        color: Colors.grey[300],
+        child: Icon(Icons.broken_image, color: Colors.grey[600]),
+      );
+    }
+  }
+
+  return Image.network(
+    imageData,
     fit: fit,
     width: width,
     height: height,
@@ -154,7 +179,7 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
 
           print('📊 Calculated average rating: $actualAverageRating');
           print('📊 Total reviews: $actualReviewCount');
-          print('� Rating breakdown: 5★=$fiveStarCount, 4★=$fourStarCount, 3★=$threeStarCount, 2★=$twoStarCount, 1★=$oneStarCount');
+          print(' Rating breakdown: 5=$fiveStarCount, 4=$fourStarCount, 3=$threeStarCount, 2=$twoStarCount, 1=$oneStarCount');
 
           _sellerRating = SellerRating(
             averageRating: actualAverageRating,
@@ -173,7 +198,7 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
         });
       }
     } catch (e) {
-      print('🚨 Error loading seller data: $e');
+      print(' Error loading seller data: $e');
       if (mounted) {
         setState(() {
           _errorMessage = 'Failed to load seller profile: ${e.toString()}';
@@ -265,8 +290,6 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
             _buildSellerBio(),
             const SizedBox(height: 24),
             _buildProductsSection(),
-            const SizedBox(height: 24),
-            _buildReviewsSection(),
           ],
         ),
       ),
@@ -487,6 +510,8 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
               child: _buildImageWidget(
                 product['image'],
                 fit: BoxFit.cover,
+                width: 80,
+                height: 80,
               ),
             ),
             const SizedBox(width: 12),

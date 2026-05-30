@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/auth_service.dart';
@@ -89,6 +90,35 @@ class _FarmerOrdersScreenState extends State<FarmerOrdersScreen> {
         _isLoading = false;
       });
     }
+  }
+
+  Widget _buildProductImage(String? imageData, {double? width, double? height}) {
+    if (imageData == null || imageData.isEmpty) {
+      return Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40);
+    }
+
+    if (imageData.startsWith('data:image')) {
+      try {
+        final base64String = imageData.split(',').last;
+        return Image.memory(
+          base64Decode(base64String),
+          width: width,
+          height: height,
+          fit: BoxFit.cover,
+          errorBuilder: (context, error, stackTrace) => Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40),
+        );
+      } catch (e) {
+        return Icon(Icons.broken_image, color: Colors.grey, size: width != null ? width / 2 : 40);
+      }
+    }
+
+    return Image.network(
+      imageData,
+      width: width,
+      height: height,
+      fit: BoxFit.cover,
+      errorBuilder: (context, error, stackTrace) => Icon(Icons.image, color: Colors.grey, size: width != null ? width / 2 : 40),
+    );
   }
 
   @override
@@ -215,15 +245,7 @@ class _FarmerOrdersScreenState extends State<FarmerOrdersScreen> {
               child: productImage != null && productImage.isNotEmpty
                   ? ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        productImage,
-                        width: 80,
-                        height: 80,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return const Icon(Icons.image, color: Colors.grey);
-                        },
-                      ),
+                      child: _buildProductImage(productImage, width: 80, height: 80),
                     )
                   : const Icon(Icons.image, color: Colors.grey),
             ),
@@ -252,6 +274,7 @@ class _FarmerOrdersScreenState extends State<FarmerOrdersScreen> {
                   const SizedBox(height: 12),
                   _buildOrderDetail('Buyer', buyerName),
                   _buildOrderDetail('Contact', buyerContact),
+                  _buildOrderDetail('Delivery Address', order['buyer_address'] ?? 'N/A'),
                   _buildOrderDetail('Quantity', quantity.toString()),
                   _buildOrderDetail('Total Price', '₱$totalPrice'),
                   _buildOrderDetail('Payment Method', paymentMethod),
