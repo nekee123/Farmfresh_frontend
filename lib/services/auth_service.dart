@@ -105,7 +105,7 @@ class AuthService extends ChangeNotifier {
   Future<bool> loginBuyer(String phoneNumber, String password) => login(phoneNumber, password);
   Future<bool> loginSeller(String phoneNumber, String password) => login(phoneNumber, password);
 
-  Future<bool> register(String name, String phoneNumber, String password, String location, {String role = 'buyer', String? profilePicture, String? category}) async {
+  Future<bool> register(String name, String phoneNumber, String password, String location, {String role = 'buyer', String? profilePicture, dynamic category}) async {
     _setLoading(true);
     _clearError();
 
@@ -116,7 +116,7 @@ class AuthService extends ChangeNotifier {
         'full_name': name,
         'location': location,
         'role': role,
-        'category': category ?? '',
+        'category': category ?? (role == 'seller' ? [] : ''),
       };
       
       if (profilePicture != null) {

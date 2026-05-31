@@ -18,7 +18,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   final _confirmPasswordController = TextEditingController();
   final _locationController = TextEditingController();
   String? _selectedRole;
-  String? _selectedCategory;
+  List<String> _selectedCategories = [];
   bool _isLoading = false;
 
   final List<String> _categories = ['Vegetables', 'Fruits', 'Grains', 'Dairy', 'Meat', 'Herbs'];
@@ -112,7 +112,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _passwordController.text,
         _locationController.text,
         role: _selectedRole!,
-        category: _selectedRole == 'seller' ? _selectedCategory : '',
+        category: _selectedRole == 'seller' ? _selectedCategories : '',
       );
 
       if (!mounted) return;
@@ -334,7 +334,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                 _selectedRole = value;
                                 // Clear category if switching back to buyer
                                 if (value == 'buyer') {
-                                  _selectedCategory = null;
+                                  _selectedCategories = [];
                                 }
                               });
                             },
@@ -348,30 +348,48 @@ class _RegisterScreenState extends State<RegisterScreen> {
                           
                           if (_selectedRole == 'seller') ...[
                             const SizedBox(height: 16),
-                            DropdownButtonFormField<String>(
-                              value: _selectedCategory,
-                              hint: const Text('Select Category'),
-                              decoration: InputDecoration(
-                                labelText: 'Primary Category',
-                                prefixIcon: const Icon(Icons.category_outlined),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                            const Align(
+                              alignment: Alignment.centerLeft,
+                              child: Text(
+                                'Select Product Categories (Multi-select)',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFF2E7D32),
                                 ),
                               ),
-                              items: _categories.map((category) => DropdownMenuItem(
-                                value: category,
-                                child: Text(category),
-                              )).toList(),
-                              onChanged: (value) {
-                                setState(() => _selectedCategory = value);
-                              },
-                              validator: (value) {
-                                if (_selectedRole == 'seller' && (value == null || value.isEmpty)) {
-                                  return 'Please select a category';
-                                }
-                                return null;
-                              },
                             ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8.0,
+                              runSpacing: 4.0,
+                              children: _categories.map((category) {
+                                final isSelected = _selectedCategories.contains(category);
+                                return FilterChip(
+                                  label: Text(category),
+                                  selected: isSelected,
+                                  selectedColor: const Color(0xFF2E7D32).withOpacity(0.2),
+                                  checkmarkColor: const Color(0xFF2E7D32),
+                                  onSelected: (bool selected) {
+                                    setState(() {
+                                      if (selected) {
+                                        _selectedCategories.add(category);
+                                      } else {
+                                        _selectedCategories.remove(category);
+                                      }
+                                    });
+                                  },
+                                );
+                              }).toList(),
+                            ),
+                            if (_selectedCategories.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.only(top: 8.0),
+                                child: Text(
+                                  'Please select at least one category',
+                                  style: TextStyle(color: Colors.red, fontSize: 12),
+                                ),
+                              ),
                           ],
                           const SizedBox(height: 16),
                           // Name Field
