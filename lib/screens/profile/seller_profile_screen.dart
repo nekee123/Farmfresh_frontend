@@ -3,10 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../services/auth_service.dart';
 import '../../services/api_service.dart';
+import '../../models/api_response.dart';
 import '../../models/seller.dart';
-import '../../models/seller_rating.dart';
-import '../../models/review.dart';
-import '../products/product_list_screen.dart';
 import '../products/product_detail_screen.dart';
 import '../orders/consumer_orders_screen.dart';
 import '../chat/chat_screen.dart';
@@ -27,24 +25,17 @@ class SellerProfileScreen extends StatefulWidget {
   State<SellerProfileScreen> createState() => _SellerProfileScreenState();
 }
 
-ImageProvider? _imageProviderFromString(String? url) {
-  if (url == null || url.isEmpty) return null;
-  if (url.startsWith('data:image')) {
-    final bytes = base64Decode(url.split(',').last);
-    return MemoryImage(bytes);
-  }
-  if (url.startsWith('http')) return NetworkImage(url);
-  // Backend may store raw base64 without the data: prefix
-  final cleaned = url.trim();
-  final base64Like = cleaned.length > 50 && RegExp(r'^[A-Za-z0-9+/=\s]+$').hasMatch(cleaned);
-  if (base64Like) {
+ImageProvider? _imageProviderFromString(String? imageData) {
+  if (imageData == null || imageData.isEmpty) return null;
+  if (imageData.startsWith('data:image')) {
     try {
-      return MemoryImage(base64Decode(cleaned));
+      final base64String = imageData.split(',').last;
+      return MemoryImage(base64Decode(base64String));
     } catch (_) {
-      // Ignore decode errors and fall through
+      return null;
     }
   }
-  return null;
+  return NetworkImage(imageData);
 }
 
 Widget _buildImageWidget(String? imageData, {BoxFit fit = BoxFit.cover, double? width, double? height}) {
@@ -98,9 +89,9 @@ Widget _buildImageWidget(String? imageData, {BoxFit fit = BoxFit.cover, double? 
 
 class _SellerProfileScreenState extends State<SellerProfileScreen> {
   Seller? _seller;
-  SellerRating? _sellerRating;
-  List<Review> _reviews = [];
+  double _averageRating = 0.0;
   List<Map<String, dynamic>> _products = [];
+  List<String> _sellerCategories = [];
   bool _isLoading = true;
   String? _errorMessage;
 
@@ -119,24 +110,23 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
     try {
       print('🔍 Loading seller data for sellerId: ${widget.sellerId}');
       
-      // Load seller rating
-      final ratingResponse = await ApiService.getSellerRating(widget.sellerId);
-      print('📊 Rating response success: ${ratingResponse.success}, data: ${ratingResponse.data}');
+      // Fetch all data in parallel
+      final results = await Future.wait([
+        ApiService.getSellerRating(widget.sellerId),
+        ApiService.getProducts(),
+        ApiService.getSellerCategories(widget.sellerId),
+      ]);
 
-      // Load seller reviews
-      final reviewsResponse = await ApiService.getSellerReviews(widget.sellerId);
-      print('📝 Reviews response success: ${reviewsResponse.success}');
-      print('📝 Reviews response data: ${reviewsResponse.data}');
-      print('📝 Reviews response error: ${reviewsResponse.error}');
-
-      // Load all products
-      final productsResponse = await ApiService.getProducts();
-      print('📦 Products response success: ${productsResponse.success}');
+      final ratingResponse = results[0] as ApiResponse<double>;
+      final productsResponse = results[1] as ApiResponse<List<Map<String, dynamic>>>;
+      final categoriesResponse = results[2] as ApiResponse<Map<String, dynamic>>;
 
       if (mounted) {
         setState(() {
+          _averageRating = ratingResponse.data ?? 0.0;
+
           // Extract seller info from raw product data
-          final sellerProductData = productsResponse.success && productsResponse.data != null
+          final sellerProductData = (productsResponse.success && productsResponse.data != null)
               ? productsResponse.data!.firstWhere(
                   (product) => product['seller_uid'] == widget.sellerId,
                   orElse: () => {},
@@ -155,43 +145,37 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
             phoneNumber: sellerPhone,
             profilePicture: sellerProfilePicture,
           );
-          print('📝 Parsing reviews...');
-          _reviews = reviewsResponse.success && reviewsResponse.data != null
-              ? reviewsResponse.data!.map((item) {
-                  print('📝 Review item: $item');
-                  return Review.fromJson(item);
-                }).toList()
-              : [];
-          print('📝 Final reviews count: ${_reviews.length}');
 
-          // Calculate actual average rating and review count from fetched reviews
-          final actualReviewCount = _reviews.length;
-          final actualAverageRating = actualReviewCount > 0
-              ? _reviews.map((r) => r.rating).reduce((a, b) => a + b) / actualReviewCount
-              : 0.0;
+          // Handle Categories
+          print('DEBUG: categoriesResponse.success = ${categoriesResponse.success}');
+          if (categoriesResponse.success && categoriesResponse.data != null) {
+            final data = categoriesResponse.data!;
+            print('DEBUG: Raw category data = $data');
+            
+            dynamic list;
+            if (data.containsKey('category')) {
+              list = data['category'];
+            } else if (data.containsKey('categories')) {
+              list = data['categories'];
+            } else if (data.containsKey('data')) {
+              final nestedData = data['data'];
+              if (nestedData is Map) {
+                list = nestedData['category'] ?? nestedData['categories'];
+              } else if (nestedData is List) {
+                list = nestedData;
+              }
+            }
 
-          // Count ratings by star level
-          final fiveStarCount = _reviews.where((r) => r.rating == 5).length;
-          final fourStarCount = _reviews.where((r) => r.rating == 4).length;
-          final threeStarCount = _reviews.where((r) => r.rating == 3).length;
-          final twoStarCount = _reviews.where((r) => r.rating == 2).length;
-          final oneStarCount = _reviews.where((r) => r.rating == 1).length;
-
-          print('📊 Calculated average rating: $actualAverageRating');
-          print('📊 Total reviews: $actualReviewCount');
-          print(' Rating breakdown: 5=$fiveStarCount, 4=$fourStarCount, 3=$threeStarCount, 2=$twoStarCount, 1=$oneStarCount');
-
-          _sellerRating = SellerRating(
-            averageRating: actualAverageRating,
-            totalReviews: actualReviewCount,
-            fiveStar: fiveStarCount,
-            fourStar: fourStarCount,
-            threeStar: threeStarCount,
-            twoStar: twoStarCount,
-            oneStar: oneStarCount,
-          );
+            if (list is List) {
+              print('DEBUG: Found list = $list');
+              _sellerCategories = list.map((e) => e.toString()).toList();
+            } else if (list is String) {
+              _sellerCategories = [list];
+            }
+          }
+          print('📊 Final mapped seller categories: $_sellerCategories');
           
-          _products = productsResponse.success && productsResponse.data != null
+          _products = (productsResponse.success && productsResponse.data != null)
               ? productsResponse.data!.where((product) => product['seller_uid'] == widget.sellerId).toList()
               : [];
           _isLoading = false;
@@ -311,6 +295,7 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
               children: [
                 CircleAvatar(
                   radius: 40,
+                  backgroundColor: Colors.grey[200],
                   backgroundImage: _imageProviderFromString(_seller!.profilePicture),
                   child: _seller!.profilePicture == null || _seller!.profilePicture!.isEmpty
                       ? Icon(Icons.person, size: 40, color: Colors.grey[400])
@@ -332,36 +317,14 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
                       const SizedBox(height: 4),
                       Row(
                         children: [
-                          Icon(Icons.star, color: const Color(0xFFFFD700), size: 16),
+                          const Icon(Icons.star, color: Color(0xFFFFD700), size: 16),
                           const SizedBox(width: 4),
                           Text(
-                            _sellerRating?.averageRating.toStringAsFixed(1) ?? '0.0',
+                            _averageRating.toStringAsFixed(1),
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                               color: Colors.grey[700],
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '(${_sellerRating?.totalReviews ?? 0} reviews)',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Icon(Icons.shopping_bag, color: Colors.grey[600], size: 16),
-                          const SizedBox(width: 4),
-                          Text(
-                            '${_products.length} orders',
-                            style: TextStyle(
-                              fontSize: 14,
-                              color: Colors.grey[600],
                             ),
                           ),
                         ],
@@ -382,6 +345,29 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
                           ),
                         ],
                       ),
+                      if (_sellerCategories.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Wrap(
+                          spacing: 4,
+                          runSpacing: 4,
+                          children: _sellerCategories.map((category) => Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF2E7D32).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFF2E7D32).withOpacity(0.3)),
+                            ),
+                            child: Text(
+                              category,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w600,
+                                color: Color(0xFF2E7D32),
+                              ),
+                            ),
+                          )).toList(),
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -605,197 +591,7 @@ class _SellerProfileScreenState extends State<SellerProfileScreen> {
     );
   }
 
-  Widget _buildReviewsSection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            const Text(
-              'Reviews',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF2E7D32),
-              ),
-            ),
-            if (_reviews.length > 3)
-              TextButton(
-                onPressed: () {
-                  // TODO: Navigate to all reviews page
-                },
-                child: const Text(
-                  'See All',
-                  style: TextStyle(
-                    color: Color(0xFF2E7D32),
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (_reviews.isEmpty)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(40),
-              child: Text(
-                'No reviews yet',
-                style: TextStyle(
-                  fontSize: 16,
-                  color: Colors.grey,
-                ),
-              ),
-            ),
-          )
-        else
-          ListView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: _reviews.length > 3 ? 3 : _reviews.length,
-            itemBuilder: (context, index) {
-              final review = _reviews[index];
-              return _buildReviewCard(review);
-            },
-          ),
-      ],
-    );
-  }
-
-  Widget _buildReviewCard(Review review) {
-    return Card(
-      elevation: 2,
-      margin: const EdgeInsets.only(bottom: 12),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 20,
-                  backgroundImage: _imageProviderFromString(review.buyerProfilePicture),
-                  child: (review.buyerProfilePicture == null || review.buyerProfilePicture?.isEmpty == true)
-                      ? Icon(Icons.person, size: 20, color: Colors.grey[400])
-                      : null,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        review.buyerName,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: List.generate(5, (index) {
-                          return Icon(
-                            index < review.rating
-                                ? Icons.star
-                                : Icons.star_border,
-                            color: const Color(0xFFFFD700),
-                            size: 16,
-                          );
-                        }),
-                      ),
-                    ],
-                  ),
-                ),
-                Text(
-                  _formatDate(review.createdAt),
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                  ),
-                ),
-              ],
-            ),
-            if (review.comment.isNotEmpty) ...[
-              const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.grey[50],
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  review.comment,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    height: 1.4,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _formatDate(DateTime dateTime) {
-    return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
-  }
-
   void _showContactDialog() {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Contact Seller'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (_seller!.phoneNumber.isNotEmpty) ...[
-                const Text('Phone:'),
-                const SizedBox(height: 4),
-                Text(
-                  _seller!.phoneNumber,
-                  style: const TextStyle(fontSize: 16),
-                ),
-                const SizedBox(height: 16),
-              ],
-              const Text('Message:'),
-              const SizedBox(height: 4),
-              const TextField(
-                decoration: InputDecoration(
-                  hintText: 'Type your message here...',
-                  border: OutlineInputBorder(),
-                ),
-                maxLines: 3,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                // TODO: Implement messaging system
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Messaging feature coming soon!'),
-                    backgroundColor: Color(0xFF2E7D32),
-                  ),
-                );
-              },
-              child: const Text('Send Message'),
-            ),
-          ],
-        );
-      },
-    );
+    // ... logic removed ...
   }
 }

@@ -1677,6 +1677,37 @@ class ApiService {
     }
   }
 
+  // Get seller categories
+  static Future<ApiResponse<Map<String, dynamic>>> getSellerCategories(String sellerId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/api/users/seller/$sellerId/category'),
+        headers: _getHeaders(),
+      ).timeout(timeout);
+      
+      print('🌐 GET Seller Categories Status: ${response.statusCode}');
+      print('📥 GET Seller Categories Body: ${response.body}');
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return ApiResponse<Map<String, dynamic>>(
+          success: true,
+          data: Map<String, dynamic>.from(data),
+        );
+      } else {
+        return ApiResponse<Map<String, dynamic>>(
+          success: false,
+          error: 'HTTP ${response.statusCode}: ${response.reasonPhrase}',
+        );
+      }
+    } catch (e) {
+      return ApiResponse<Map<String, dynamic>>(
+        success: false,
+        error: 'Network error: $e',
+      );
+    }
+  }
+
   // Search items (products, sellers, buyers)
   static Future<ApiResponse<List<Map<String, dynamic>>>> searchItems(String query, String searchType) async {
     try {
